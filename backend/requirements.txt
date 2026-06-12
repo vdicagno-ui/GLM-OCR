@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pdf2image
+Pillow
+httpx
+python-multipart

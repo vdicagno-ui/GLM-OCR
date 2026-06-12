@@ -51,6 +51,6 @@ def convert_single_page(pdf_path: str, page_num: int, output_dir: str, dpi: int 
     if not images:
         raise ValueError(f"Could not convert page {page_num}")
 
-    out_path = output_dir / f"page_{page_num:04d}_ocr.png"
+    out_path = output_dir / f"ocr_page_{page_num:04d}.png"
     images[0].save(str(out_path), "PNG")
     return str(out_path)

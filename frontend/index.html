@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GLM-OCR — PDF to Markdown</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ================================================================
+       HEADER
+  ================================================================ -->
+  <header>
+    <h1>GLM-OCR</h1>
+    <span class="tagline">PDF → Markdown via Ollama</span>
+    <div class="header-spacer"></div>
+
+    <!-- Ollama status pill -->
+    <div id="statusPill">
+      <span class="dot"></span>
+      <span id="statusText">Checking Ollama…</span>
+    </div>
+
+    <!-- File name + close button (shown when job active) -->
+    <span id="jobFilename" class="hidden" style="font-size:0.8rem;color:var(--text-dim);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"></span>
+    <button id="btnClose" class="btn-danger hidden" title="Close job">✕ Close</button>
+  </header>
+
+  <!-- ================================================================
+       UPLOAD ZONE  (shown when no job active)
+  ================================================================ -->
+  <div id="uploadZone">
+    <div class="drop-area" id="dropArea">
+      <div class="icon">📄</div>
+      <h2>Drop a PDF here</h2>
+      <p>or click to browse</p>
+      <input type="file" id="fileInput" accept=".pdf" />
+    </div>
+    <p style="font-size:0.78rem;color:var(--text-dim);">Scanned / dirty PDFs supported · Max 200 MB</p>
+  </div>
+
+  <!-- ================================================================
+       WORKSPACE  (shown when job active)
+  ================================================================ -->
+  <div id="workspace">
+
+    <!-- Toolbar -->
+    <div id="toolbar">
+      <!-- Page navigation -->
+      <div id="pageNav">
+        <button id="btnPrev" class="btn-icon" title="Previous page">&#8592;</button>
+        <input id="pageInput" type="number" min="1" value="1" title="Go to page" />
+        <span id="pageLabel">/ 0</span>
+        <button id="btnNext" class="btn-icon" title="Next page">&#8594;</button>
+      </div>
+
+      <div class="sep"></div>
+
+      <!-- Per-page status dot -->
+      <span id="currentPageDot" class="page-status-dot pending" title="Page status"></span>
+
+      <button id="btnOcrPage" class="btn-primary">OCR Page</button>
+      <button id="btnOcrAll"  class="btn-secondary">OCR All Pages</button>
+
+      <div class="sep"></div>
+
+      <!-- Progress bar (hidden unless OCR-all running) -->
+      <div id="progressWrap">
+        <div id="progressBar"><div id="progressFill"></div></div>
+        <span id="progressLabel">0 / 0</span>
+        <button id="btnCancelOcr" class="btn-danger" style="padding:4px 10px;font-size:0.75rem;">Cancel</button>
+      </div>
+
+      <div class="header-spacer"></div>
+
+      <!-- Save indicator -->
+      <span id="saveIndicator"></span>
+    </div>
+
+    <!-- Main panels -->
+    <div id="panels">
+
+      <!-- LEFT: page image viewer -->
+      <div class="panel" id="imagePanel">
+        <div class="panel-header">
+          <h3>Page Preview</h3>
+        </div>
+        <div class="panel-body">
+          <span id="imageLoading">Loading…</span>
+          <img id="pageImage" src="" alt="Page preview" style="display:none;" />
+        </div>
+      </div>
+
+      <!-- RIGHT: markdown editor / preview -->
+      <div class="panel" id="markdownPanel">
+        <div class="panel-header">
+          <h3>Markdown</h3>
+          <span id="markdownPageDot" class="page-status-dot pending" title="OCR status"></span>
+          <button id="btnTogglePreview" class="btn-secondary" style="padding:3px 10px;font-size:0.75rem;">Preview</button>
+          <button id="btnCopyMd" class="btn-secondary" style="padding:3px 10px;font-size:0.75rem;" title="Copy markdown">Copy</button>
+          <button id="btnDownloadMd" class="btn-secondary" style="padding:3px 10px;font-size:0.75rem;" title="Download all markdown">↓ All</button>
+        </div>
+        <div class="panel-body">
+          <textarea id="markdownEditor" placeholder="OCR output will appear here. Click 'OCR Page' or 'OCR All Pages' to start."></textarea>
+          <div id="markdownPreview"></div>
+        </div>
+      </div>
+
+    </div><!-- /panels -->
+
+    <!-- Thumbnail strip -->
+    <div id="thumbStrip"></div>
+
+  </div><!-- /workspace -->
+
+  <!-- ================================================================
+       LOADING OVERLAY
+  ================================================================ -->
+  <div id="loadingOverlay">
+    <div class="spinner"></div>
+    <p id="loadingMsg">Processing…</p>
+  </div>
+
+  <!-- ================================================================
+       TOAST CONTAINER
+  ================================================================ -->
+  <div id="toastContainer"></div>
+
+  <!-- marked.js for markdown preview -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

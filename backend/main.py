@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -277,6 +278,7 @@ async def delete_job(job_id: str):
 # Static frontend — must be mounted LAST so API routes take priority
 # ---------------------------------------------------------------------------
 
-_frontend_dir = Path(__file__).parent.parent / "frontend"
+_base_dir = Path(sys._MEIPASS) if getattr(sys, "frozen", False) else Path(__file__).parent.parent
+_frontend_dir = _base_dir / "frontend"
 if _frontend_dir.exists():
     app.mount("/", StaticFiles(directory=str(_frontend_dir), html=True), name="frontend")

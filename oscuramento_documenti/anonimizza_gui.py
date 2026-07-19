@@ -1,7 +1,8 @@
 """
 Oscura Documenti - GUI desktop per l'anonimizzazione di file .docx
-Basato sullo script da riga di comando: sostituisce nome/cognome, data di nascita
-e codice fiscale con dei tag di copertura in tutti i file .docx di una cartella.
+Sostituisce nomi/cognomi (con dicitura personalizzabile per ciascuno),
+date di nascita, numeri di telefono e codice fiscale in tutti i file
+.docx di una cartella.
 """
 import os
 import re
@@ -14,8 +15,9 @@ from docx import Document
 from docx.text.paragraph import Paragraph
 from dateutil import parser
 
-TAG_NOME = "[soggetto_interessato]"
-TAG_DATA = "[data_nascita_oscurata]"
+TAG_NOME_DEFAULT = "[soggetto_interessato]"
+DATA_SOSTITUZIONE = "00.00.00"
+TAG_TELEFONO = "[numero_di_telefono_oscurato]"
 TAG_CF = "[codice_fiscale_oscurato]"
 
 MESI_IT = {
@@ -27,6 +29,14 @@ MESI_IT = {
 REGEX_CF = re.compile(
     r"\b[A-Z]{6}\d{2}[A-EHLMPR-T][0-9LMNPQRSTUV]{2}[A-Z]\d{3}[A-Z]\b",
     re.IGNORECASE
+)
+
+# Cellulari (3xx xxxxxxx) e fissi (0x[x[x]] xxxxxxxx), con o senza prefisso
+# internazionale e con separatori opzionali (spazi, punti, trattini).
+REGEX_TELEFONO = re.compile(
+    r"\b(?:\+39[\s.-]?|0039[\s.-]?)?"
+    r"(?:3\d{2}|0\d{1,3})"
+    r"(?:[\s.-]?\d){6,8}\b"
 )
 
 
@@ -97,7 +107,9 @@ def applica_sostituzione_sicura(paragraph, regex, tag_copertura):
     return False
 
 
-def anonimizza_singolo_file(file_path, regex_nome, regex_data, log):
+def anonimizza_singolo_file(file_path, regex_nomi, regex_date, oscura_telefoni, log):
+    """regex_nomi: lista di tuple (regex, tag_sostituzione).
+    regex_date: lista di regex; ogni corrispondenza viene sostituita da DATA_SOSTITUZIONE."""
     try:
         doc = Document(file_path)
         modificato = False
@@ -123,10 +135,26 @@ def anonimizza_singolo_file(file_path, regex_nome, regex_data, log):
                         tutti_i_paragrafi.append(Paragraph(p_element, doc))
 
         for p in tutti_i_paragrafi:
-            cambiato_nome = applica_sostituzione_sicura(p, regex_nome, TAG_NOME)
-            cambiato_data = applica_sostituzione_sicura(p, regex_data, TAG_DATA)
-            cambiato_cf = applica_sostituzione_sicura(p, REGEX_CF, TAG_CF)
-            if cambiato_nome or cambiato_data or cambiato_cf:
+            cambiato = False
+
+            for regex_nome, tag_nome in regex_nomi:
+                if applica_sostituzione_sicura(p, regex_nome, tag_nome):
+                    cambiato = True
+
+            # I numeri di telefono vanno oscurati prima delle date: la
+            # dicitura di sostituzione della data ("00.00.00") e' a sua
+            # volta un pattern numerico e verrebbe altrimenti ri-catturato.
+            if oscura_telefoni and applica_sostituzione_sicura(p, REGEX_TELEFONO, TAG_TELEFONO):
+                cambiato = True
+
+            for regex_data in regex_date:
+                if applica_sostituzione_sicura(p, regex_data, DATA_SOSTITUZIONE):
+                    cambiato = True
+
+            if applica_sostituzione_sicura(p, REGEX_CF, TAG_CF):
+                cambiato = True
+
+            if cambiato:
                 modificato = True
 
         if modificato:
@@ -138,14 +166,28 @@ def anonimizza_singolo_file(file_path, regex_nome, regex_data, log):
         return False
 
 
-def elabora_cartella(cartella, nome_input, data_input, log):
+def elabora_cartella(cartella, nominativi, date_input, oscura_telefoni, log):
+    """nominativi: lista di tuple (nome_completo, tag_sostituzione).
+    date_input: lista di stringhe data in qualsiasi formato."""
     if not os.path.exists(cartella):
         log(f"Errore: la cartella '{cartella}' non esiste.")
         return
 
-    regex_nome = genera_regex_nome(nome_input)
-    regex_data, etichetta_data = genera_regex_data(data_input)
-    log(f"✅ Configurazione completata per il soggetto e per la data: {etichetta_data}")
+    regex_nomi = [
+        (genera_regex_nome(nome), tag.strip() or TAG_NOME_DEFAULT)
+        for nome, tag in nominativi
+    ]
+
+    regex_date = []
+    etichette_date = []
+    for data_input in date_input:
+        regex_data, etichetta_data = genera_regex_data(data_input)
+        regex_date.append(regex_data)
+        etichette_date.append(etichetta_data)
+
+    log(f"✅ Nominativi configurati: {len(regex_nomi)} | Date configurate: {', '.join(etichette_date)}")
+    if oscura_telefoni:
+        log("✅ Oscuramento numeri di telefono attivo.")
 
     files = [f for f in os.listdir(cartella) if f.endswith('.docx') and not f.startswith('~$')]
 
@@ -158,9 +200,11 @@ def elabora_cartella(cartella, nome_input, data_input, log):
 
     for file_nome in files:
         percorso_completo = os.path.join(cartella, file_nome)
-        ha_subito_modifiche = anonimizza_singolo_file(percorso_completo, regex_nome, regex_data, log)
+        ha_subito_modifiche = anonimizza_singolo_file(
+            percorso_completo, regex_nomi, regex_date, oscura_telefoni, log
+        )
         if ha_subito_modifiche:
-            log(f" Modificato (Rilevato testo/date/CF): {file_nome}")
+            log(f" Modificato (Rilevato testo/date/telefono/CF): {file_nome}")
             file_modificati += 1
         else:
             log(f" Saltato (Nessuna corrispondenza): {file_nome}")
@@ -168,44 +212,130 @@ def elabora_cartella(cartella, nome_input, data_input, log):
     log(f"\nFine! File totali modificati ed anonimizzati: {file_modificati}/{len(files)}")
 
 
+class NominativoRow:
+    def __init__(self, parent, on_remove):
+        self.frame = ttk.Frame(parent)
+        self.nome_var = tk.StringVar()
+        self.tag_var = tk.StringVar()
+
+        ttk.Entry(self.frame, textvariable=self.nome_var, width=26).pack(side="left", padx=(0, 4))
+        ttk.Entry(self.frame, textvariable=self.tag_var, width=26).pack(side="left", padx=(0, 4))
+        ttk.Button(self.frame, text="✕", width=3, command=lambda: on_remove(self)).pack(side="left")
+
+        self.frame.pack(fill="x", pady=2)
+
+    def valori(self):
+        return self.nome_var.get().strip(), self.tag_var.get().strip()
+
+    def destroy(self):
+        self.frame.destroy()
+
+
+class DataRow:
+    def __init__(self, parent, on_remove):
+        self.frame = ttk.Frame(parent)
+        self.data_var = tk.StringVar()
+
+        ttk.Entry(self.frame, textvariable=self.data_var, width=26).pack(side="left", padx=(0, 4))
+        ttk.Button(self.frame, text="✕", width=3, command=lambda: on_remove(self)).pack(side="left")
+
+        self.frame.pack(fill="x", pady=2)
+
+    def valore(self):
+        return self.data_var.get().strip()
+
+    def destroy(self):
+        self.frame.destroy()
+
+
 class OscuraDocumentiApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Oscura Documenti")
-        self.root.geometry("640x520")
-        self.root.minsize(560, 440)
+        self.root.geometry("720x700")
+        self.root.minsize(640, 560)
 
         self.log_queue = queue.Queue()
         self.worker_thread = None
+        self.nominativi_rows = []
+        self.date_rows = []
 
         self._build_ui()
         self.root.after(100, self._poll_log_queue)
 
     def _build_ui(self):
         pad = {"padx": 10, "pady": 6}
-        frame = ttk.Frame(self.root)
-        frame.pack(fill="x", **pad)
 
-        ttk.Label(frame, text="Cartella da elaborare:").grid(row=0, column=0, sticky="w")
+        top = ttk.Frame(self.root)
+        top.pack(fill="x", **pad)
+        top.columnconfigure(0, weight=1)
+
+        ttk.Label(top, text="Cartella da elaborare:").grid(row=0, column=0, sticky="w")
         self.cartella_var = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.cartella_var, width=50).grid(row=1, column=0, sticky="we")
-        ttk.Button(frame, text="Sfoglia...", command=self._scegli_cartella).grid(row=1, column=1, padx=(6, 0))
+        ttk.Entry(top, textvariable=self.cartella_var).grid(row=1, column=0, sticky="we")
+        ttk.Button(top, text="Sfoglia...", command=self._scegli_cartella).grid(row=1, column=1, padx=(6, 0))
 
-        ttk.Label(frame, text="Nome e Cognome da oscurare:").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        self.nome_var = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.nome_var, width=50).grid(row=3, column=0, columnspan=2, sticky="we")
+        # --- Nominativi ---
+        nomi_frame = ttk.LabelFrame(self.root, text="Nominativi da oscurare")
+        nomi_frame.pack(fill="x", **pad)
 
-        ttk.Label(frame, text="Data di nascita (qualsiasi formato):").grid(row=4, column=0, sticky="w", pady=(10, 0))
-        self.data_var = tk.StringVar()
-        ttk.Entry(frame, textvariable=self.data_var, width=50).grid(row=5, column=0, columnspan=2, sticky="we")
+        header = ttk.Frame(nomi_frame)
+        header.pack(fill="x", pady=(4, 0))
+        ttk.Label(header, text="Nome e Cognome", width=26).pack(side="left", padx=(0, 4))
+        ttk.Label(header, text="Dicitura di sostituzione", width=26).pack(side="left", padx=(0, 4))
 
-        frame.columnconfigure(0, weight=1)
+        self.nominativi_container = ttk.Frame(nomi_frame)
+        self.nominativi_container.pack(fill="x")
+
+        ttk.Button(
+            nomi_frame, text="+ Aggiungi nominativo", command=self._aggiungi_nominativo
+        ).pack(anchor="w", pady=(4, 6))
+
+        # --- Date ---
+        date_frame = ttk.LabelFrame(
+            self.root, text=f"Date di nascita da oscurare (sostituite da \"{DATA_SOSTITUZIONE}\")"
+        )
+        date_frame.pack(fill="x", **pad)
+
+        self.date_container = ttk.Frame(date_frame)
+        self.date_container.pack(fill="x", pady=(4, 0))
+
+        ttk.Button(
+            date_frame, text="+ Aggiungi data", command=self._aggiungi_data
+        ).pack(anchor="w", pady=(4, 6))
+
+        # --- Opzioni ---
+        opzioni_frame = ttk.Frame(self.root)
+        opzioni_frame.pack(fill="x", **pad)
+        self.telefoni_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            opzioni_frame, text="Oscura anche i numeri di telefono", variable=self.telefoni_var
+        ).pack(anchor="w")
 
         self.avvia_btn = ttk.Button(self.root, text="Avvia oscuramento", command=self._avvia)
         self.avvia_btn.pack(pady=(4, 8))
 
-        self.log_text = scrolledtext.ScrolledText(self.root, wrap="word", state="disabled")
+        self.log_text = scrolledtext.ScrolledText(self.root, wrap="word", height=10, state="disabled")
         self.log_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        self._aggiungi_nominativo()
+        self._aggiungi_data()
+
+    def _aggiungi_nominativo(self):
+        row = NominativoRow(self.nominativi_container, self._rimuovi_nominativo)
+        self.nominativi_rows.append(row)
+
+    def _rimuovi_nominativo(self, row):
+        row.destroy()
+        self.nominativi_rows.remove(row)
+
+    def _aggiungi_data(self):
+        row = DataRow(self.date_container, self._rimuovi_data)
+        self.date_rows.append(row)
+
+    def _rimuovi_data(self, row):
+        row.destroy()
+        self.date_rows.remove(row)
 
     def _scegli_cartella(self):
         percorso = filedialog.askdirectory(title="Seleziona la cartella con i file .docx")
@@ -229,17 +359,27 @@ class OscuraDocumentiApp:
 
     def _avvia(self):
         cartella = self.cartella_var.get().strip()
-        nome = self.nome_var.get().strip()
-        data = self.data_var.get().strip()
+        nominativi = [row.valori() for row in self.nominativi_rows]
+        nominativi = [(nome, tag) for nome, tag in nominativi if nome]
+        date_input = [row.valore() for row in self.date_rows]
+        date_input = [d for d in date_input if d]
+        oscura_telefoni = self.telefoni_var.get()
 
         if not cartella:
             messagebox.showwarning("Campo mancante", "Seleziona la cartella da elaborare.")
             return
-        if not nome:
-            messagebox.showwarning("Campo mancante", "Inserisci il nome e cognome da oscurare.")
+        if not nominativi:
+            messagebox.showwarning("Campo mancante", "Inserisci almeno un nominativo da oscurare.")
             return
-        if not data:
-            messagebox.showwarning("Campo mancante", "Inserisci la data da oscurare.")
+        if not date_input:
+            messagebox.showwarning("Campo mancante", "Inserisci almeno una data da oscurare.")
+            return
+
+        try:
+            for data_input in date_input:
+                parser.parse(data_input, dayfirst=True, fuzzy=True)
+        except Exception as e:
+            messagebox.showerror("Data non valida", f"Impossibile interpretare la data '{data_input}': {e}")
             return
 
         self.log_text.configure(state="normal")
@@ -248,13 +388,15 @@ class OscuraDocumentiApp:
 
         self.avvia_btn.configure(state="disabled")
         self.worker_thread = threading.Thread(
-            target=self._esegui_elaborazione, args=(cartella, nome, data), daemon=True
+            target=self._esegui_elaborazione,
+            args=(cartella, nominativi, date_input, oscura_telefoni),
+            daemon=True
         )
         self.worker_thread.start()
 
-    def _esegui_elaborazione(self, cartella, nome, data):
+    def _esegui_elaborazione(self, cartella, nominativi, date_input, oscura_telefoni):
         try:
-            elabora_cartella(cartella, nome, data, self._log)
+            elabora_cartella(cartella, nominativi, date_input, oscura_telefoni, self._log)
         except Exception as e:
             self._log(f"❌ Impossibile completare l'operazione: {e}")
         finally:

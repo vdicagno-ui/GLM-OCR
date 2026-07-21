@@ -31,36 +31,51 @@ REGEX_CF = re.compile(
     re.IGNORECASE
 )
 
-# Cellulari (3xx xxxxxxx) e fissi (0x[x[x]] xxxxxxxx), con o senza prefisso
-# internazionale e con separatori opzionali (spazi, punti, trattini).
+# Numeri di telefono italiani, con o senza prefisso internazionale e con
+# separatori opzionali (spazi, punti, trattini).
+# Si richiedono ALMENO 9 cifre: le date (max 8 cifre, es. gg.mm.aaaa) non
+# possono cosi' essere scambiate per numeri di telefono ed oscurate per errore.
+#  - Cellulare: 3xx + 6/7 cifre  -> 9/10 cifre
+#  - Fisso:     0x  + 7/9 cifre  -> 9/11 cifre
 REGEX_TELEFONO = re.compile(
-    r"\b(?:\+39[\s.-]?|0039[\s.-]?)?"
-    r"(?:3\d{2}|0\d{1,3})"
-    r"(?:[\s.-]?\d){6,8}\b"
+    r"(?<!\d)"
+    r"(?:(?:\+|00)39[\s.\-]?)?"
+    r"(?:"
+    r"3\d{2}(?:[\s.\-]?\d){6,7}"
+    r"|"
+    r"0\d(?:[\s.\-]?\d){7,9}"
+    r")"
+    r"(?!\d)"
 )
 
 
 def genera_regex_nome(nome_completo):
-    parti = [re.escape(p) for p in nome_completo.split() if p]
+    # La compilazione con re.IGNORECASE rende il riconoscimento indipendente
+    # dal maiuscolo/minuscolo: "MARIO ROSSI", "mario rossi" e "Mario Rossi"
+    # vengono tutti individuati.
+    parti = [p for p in nome_completo.split() if p]
     if not parti:
         raise ValueError("Nome e cognome non possono essere vuoti.")
 
-    if len(parti) >= 2:
-        p1, p2 = parti[0], parti[1]
-        iniziale_p1 = rf"{p1[0]}\."
-        iniziale_p2 = rf"{p2[0]}\."
+    esc = [re.escape(p) for p in parti]
+
+    if len(esc) >= 2:
+        esc_primo, esc_ultimo = esc[0], esc[-1]
+        ini_primo = re.escape(parti[0][0])
+        ini_ultimo = re.escape(parti[-1][0])
 
         pattern_list = [
-            rf"{p1}\s+{p2}",
-            rf"{p2}\s+{p1}",
-            rf"{iniziale_p1}\s+{p2}",
-            rf"{iniziale_p2}\s+{p1}",
-            p1,
-            p2
+            r"\s+".join(esc),                    # tutti i nomi in ordine (anche 3+ parole)
+            r"\s+".join(reversed(esc)),          # ordine invertito
+            rf"{esc_primo}\s+{esc_ultimo}",      # primo + ultimo (salta eventuali secondi nomi)
+            rf"{esc_ultimo}\s+{esc_primo}",      # ultimo + primo
+            rf"{ini_primo}\.\s+{esc_ultimo}",    # M. Rossi
+            rf"{ini_ultimo}\.\s+{esc_primo}",    # R. Mario
         ]
-        pattern_finale = r"\b(" + "|".join(pattern_list) + r")\b"
+        pattern_list.extend(esc)                 # ogni parola singola
+        pattern_finale = r"\b(?:" + "|".join(pattern_list) + r")\b"
     else:
-        pattern_finale = rf"\b{parti[0]}\b"
+        pattern_finale = rf"\b{esc[0]}\b"
 
     return re.compile(pattern_finale, re.IGNORECASE)
 
@@ -141,15 +156,16 @@ def anonimizza_singolo_file(file_path, regex_nomi, regex_date, oscura_telefoni, 
                 if applica_sostituzione_sicura(p, regex_nome, tag_nome):
                     cambiato = True
 
-            # I numeri di telefono vanno oscurati prima delle date: la
-            # dicitura di sostituzione della data ("00.00.00") e' a sua
-            # volta un pattern numerico e verrebbe altrimenti ri-catturato.
-            if oscura_telefoni and applica_sostituzione_sicura(p, REGEX_TELEFONO, TAG_TELEFONO):
-                cambiato = True
-
+            # Le date vengono oscurate PRIMA dei telefoni: le date
+            # configurate diventano "00.00.00" (solo 6 cifre) e non possono
+            # piu' essere scambiate per un numero di telefono, mentre il
+            # regex del telefono (min. 9 cifre) non tocca le date residue.
             for regex_data in regex_date:
                 if applica_sostituzione_sicura(p, regex_data, DATA_SOSTITUZIONE):
                     cambiato = True
+
+            if oscura_telefoni and applica_sostituzione_sicura(p, REGEX_TELEFONO, TAG_TELEFONO):
+                cambiato = True
 
             if applica_sostituzione_sicura(p, REGEX_CF, TAG_CF):
                 cambiato = True

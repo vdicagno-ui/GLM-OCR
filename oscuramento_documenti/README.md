@@ -46,7 +46,21 @@ essere lanciato senza bisogno di Python installato.
    telefono" per oscurare anche cellulari e fissi italiani rilevati nel
    testo, sostituendoli con `[numero_di_telefono_oscurato]`.
 6. Premi "Avvia oscuramento": il log mostra in tempo reale i file
-   modificati o saltati.
+   elaborati.
+
+Le date vengono riconosciute in **qualsiasi formato** (es. `12/07/1990`,
+`12-07-1990`, `12.07.1990`, `12 07 1990`, `12/7/90`, `12 luglio 1990`,
+`12 lug 1990`, ISO `1990-07-12`), indipendentemente dal formato con cui
+sono state digitate nell'app.
 
 Il codice fiscale viene sempre oscurato con il tag
-`[codice_fiscale_oscurato]`. I file vengono sovrascritti in loco.
+`[codice_fiscale_oscurato]`.
+
+## File di output
+
+I file originali **non vengono modificati**. I documenti anonimizzati
+vengono salvati in una sottocartella `Documenti_Anonimizzati` creata
+dentro la cartella selezionata. Questo evita anche l'errore di "permesso
+negato" (Errore 13) che si verifica quando si prova a sovrascrivere un
+file aperto in Word o in sola lettura: chiudere comunque i file in Word
+prima di elaborarli è consigliato.

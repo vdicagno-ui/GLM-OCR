@@ -7,6 +7,7 @@ date di nascita, numeri di telefono e codice fiscale in tutti i file
 import os
 import re
 import queue
+import shutil
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
@@ -24,6 +25,12 @@ MESI_IT = {
     1: "gennaio", 2: "febbraio", 3: "marzo", 4: "aprile",
     5: "maggio", 6: "giugno", 7: "luglio", 8: "agosto",
     9: "settembre", 10: "ottobre", 11: "novembre", 12: "dicembre"
+}
+
+MESI_ABBR = {
+    1: "gen", 2: "feb", 3: "mar", 4: "apr",
+    5: "mag", 6: "giu", 7: "lug", 8: "ago",
+    9: "set", 10: "ott", 11: "nov", 12: "dic"
 }
 
 REGEX_CF = re.compile(
@@ -80,29 +87,51 @@ def genera_regex_nome(nome_completo):
     return re.compile(pattern_finale, re.IGNORECASE)
 
 
+def interpreta_data(input_data):
+    """Interpreta una data scritta in QUALSIASI formato, inclusi i mesi
+    italiani (per esteso o abbreviati) che dateutil non riconosce da solo."""
+    testo = input_data.strip().lower()
+    # Sostituisce i nomi dei mesi italiani con il numero corrispondente,
+    # cosi' dateutil riesce ad interpretarli. I nomi per esteso vanno
+    # sostituiti prima delle abbreviazioni (es. "gennaio" prima di "gen").
+    for num, nome in MESI_IT.items():
+        testo = re.sub(rf"\b{nome}\b", f" {num} ", testo)
+    for num, ab in MESI_ABBR.items():
+        testo = re.sub(rf"\b{ab}\.?\b", f" {num} ", testo)
+    # Se la data inizia con un anno a 4 cifre (formato ISO aaaa-mm-gg) va
+    # interpretata come anno-mese-giorno; altrimenti si assume il giorno
+    # per primo, come d'uso in Italia (gg/mm/aaaa).
+    if re.match(r"^\s*\d{4}[\s./\-]", testo):
+        return parser.parse(testo, yearfirst=True, dayfirst=False, fuzzy=True)
+    return parser.parse(testo, dayfirst=True, fuzzy=True)
+
+
 def genera_regex_data(input_data):
-    data_oggetto = parser.parse(input_data, dayfirst=True, fuzzy=True)
-    giorno = str(data_oggetto.day)
-    giorno_zero = giorno.zfill(2)
-    mese_num = str(data_oggetto.month)
-    mese_zero = mese_num.zfill(2)
+    data_oggetto = interpreta_data(input_data)
+    giorno = data_oggetto.day
+    mese = data_oggetto.month
     anno_completo = str(data_oggetto.year)
     anno_corto = anno_completo[-2:]
-    mese_testo = MESI_IT[data_oggetto.month]
+
+    # Giorno/mese con zero iniziale OPZIONALE (es. "5" oppure "05").
+    gg = rf"0?{giorno}"
+    mm = rf"0?{mese}"
+    # Anno a 4 o 2 cifre.
+    anno = rf"(?:{anno_completo}|{anno_corto})"
+    # Separatori numerici ammessi: spazio, punto, barra, trattino.
+    sep = r"[\s./\-]"
+    # Mese testuale: per esteso o abbreviato (con punto facoltativo).
+    mese_full = MESI_IT[mese]
+    mese_abbr = MESI_ABBR[mese]
+    mese_testo = rf"(?:{mese_full}|{mese_abbr}\.?)"
 
     pattern_date = [
-        rf"{giorno_zero}[/.-]{mese_zero}[/.-]{anno_completo}",
-        rf"{giorno}[/.-]{mese_num}[/.-]{anno_completo}",
-        rf"{giorno_zero}[/.-]{mese_zero}[/.-]{anno_corto}",
-        rf"{giorno}[/.-]{mese_num}[/.-]{anno_corto}",
-        rf"{anno_completo}[/.-]{mese_zero}[/.-]{giorno_zero}",
-        rf"{giorno}\s+{mese_testo}\s+{anno_completo}",
-        rf"{giorno_zero}\s+{mese_testo}\s+{anno_completo}",
-        rf"{giorno}\s+{mese_testo}\s+{anno_corto}",
-        rf"{giorno_zero}\s+{mese_testo}\s+{anno_corto}"
+        rf"{gg}{sep}{mm}{sep}{anno}",          # gg/mm/aaaa, g-m-aa, gg.mm.aa, gg mm aaaa ...
+        rf"{anno_completo}{sep}{mm}{sep}{gg}",  # aaaa-mm-gg (ISO)
+        rf"{gg}\s+{mese_testo}\s+{anno}",       # 5 marzo 1985, 05 mar 85 ...
     ]
-    regex = re.compile(r"\b(" + "|".join(pattern_date) + r")\b", re.IGNORECASE)
-    etichetta = f"{giorno_zero} {mese_testo} {anno_completo}"
+    regex = re.compile(r"\b(?:" + "|".join(pattern_date) + r")\b", re.IGNORECASE)
+    etichetta = f"{str(giorno).zfill(2)} {mese_full} {anno_completo}"
     return regex, etichetta
 
 
@@ -122,8 +151,12 @@ def applica_sostituzione_sicura(paragraph, regex, tag_copertura):
     return False
 
 
-def anonimizza_singolo_file(file_path, regex_nomi, regex_date, oscura_telefoni, log):
-    """regex_nomi: lista di tuple (regex, tag_sostituzione).
+def anonimizza_singolo_file(file_path, output_path, regex_nomi, regex_date, oscura_telefoni, log):
+    """Legge file_path, applica le sostituzioni e scrive il risultato in
+    output_path (senza mai sovrascrivere l'originale).
+    Ritorna 'modificato', 'copiato' oppure 'errore'.
+
+    regex_nomi: lista di tuple (regex, tag_sostituzione).
     regex_date: lista di regex; ogni corrispondenza viene sostituita da DATA_SOSTITUZIONE."""
     try:
         doc = Document(file_path)
@@ -174,12 +207,21 @@ def anonimizza_singolo_file(file_path, regex_nomi, regex_date, oscura_telefoni, 
                 modificato = True
 
         if modificato:
-            doc.save(file_path)
-            return True
-        return False
+            doc.save(output_path)
+            return "modificato"
+        # Nessun dato sensibile trovato: copiamo comunque l'originale nella
+        # cartella di output cosi' da avere l'insieme completo dei documenti.
+        shutil.copy2(file_path, output_path)
+        return "copiato"
+    except PermissionError:
+        log(
+            f"❌ Permesso negato su '{os.path.basename(file_path)}' (Errore 13). "
+            "Chiudi il file se e' aperto in Word e assicurati che non sia in sola lettura."
+        )
+        return "errore"
     except Exception as e:
         log(f"❌ Errore durante l'elaborazione di {os.path.basename(file_path)}: {e}")
-        return False
+        return "errore"
 
 
 def elabora_cartella(cartella, nominativi, date_input, oscura_telefoni, log):
@@ -205,27 +247,47 @@ def elabora_cartella(cartella, nominativi, date_input, oscura_telefoni, log):
     if oscura_telefoni:
         log("✅ Oscuramento numeri di telefono attivo.")
 
-    files = [f for f in os.listdir(cartella) if f.endswith('.docx') and not f.startswith('~$')]
+    cartella_output = os.path.join(cartella, "Documenti_Anonimizzati")
+    try:
+        os.makedirs(cartella_output, exist_ok=True)
+    except PermissionError:
+        log(
+            f"❌ Impossibile creare la cartella di output '{cartella_output}' (Errore 13). "
+            "Scegli una cartella su cui hai i permessi di scrittura (es. Desktop o Documenti)."
+        )
+        return
+
+    files = [
+        f for f in os.listdir(cartella)
+        if f.endswith('.docx') and not f.startswith('~$')
+    ]
 
     if not files:
         log(f"Nessun file .docx trovato in '{cartella}'.")
         return
 
-    log(f"Inizio... Elaborazione di {len(files)} file nella cartella '{cartella}'...\n")
+    log(f"Inizio... Elaborazione di {len(files)} file nella cartella '{cartella}'...")
+    log(f"I file anonimizzati verranno salvati in: {cartella_output}\n")
     file_modificati = 0
+    file_errori = 0
 
     for file_nome in files:
         percorso_completo = os.path.join(cartella, file_nome)
-        ha_subito_modifiche = anonimizza_singolo_file(
-            percorso_completo, regex_nomi, regex_date, oscura_telefoni, log
+        percorso_output = os.path.join(cartella_output, file_nome)
+        esito = anonimizza_singolo_file(
+            percorso_completo, percorso_output, regex_nomi, regex_date, oscura_telefoni, log
         )
-        if ha_subito_modifiche:
-            log(f" Modificato (Rilevato testo/date/telefono/CF): {file_nome}")
+        if esito == "modificato":
+            log(f" Anonimizzato (Rilevato testo/date/telefono/CF): {file_nome}")
             file_modificati += 1
+        elif esito == "copiato":
+            log(f" Copiato (Nessuna corrispondenza): {file_nome}")
         else:
-            log(f" Saltato (Nessuna corrispondenza): {file_nome}")
+            file_errori += 1
 
-    log(f"\nFine! File totali modificati ed anonimizzati: {file_modificati}/{len(files)}")
+    log(f"\nFine! File anonimizzati: {file_modificati}/{len(files)}"
+        + (f" | File con errori: {file_errori}" if file_errori else ""))
+    log(f"Trovi tutti i documenti nella cartella: {cartella_output}")
 
 
 class NominativoRow:

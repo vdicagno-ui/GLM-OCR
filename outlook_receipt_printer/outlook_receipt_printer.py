@@ -23,10 +23,19 @@ in PDF, oppure PDF24). Dipendenza Python: pywin32.
 
 import os
 import sys
+import uuid
 import queue
+import shutil
+import tempfile
 import threading
 import traceback
 from datetime import date, datetime
+
+# Cartella di lavoro temporanea LOCALE (sempre su un disco locale, tipicamente
+# C:). Word e PDF24 leggono/scrivono qui i file temporanei; il PDF finito viene
+# poi spostato nella cartella di destinazione scelta dall'utente (che puo'
+# trovarsi su un disco di rete/mappato non visibile ai processi in background).
+WORK_DIR = os.path.join(tempfile.gettempdir(), "StampaRicevutePEC")
 
 def _load_config():
     """
@@ -294,9 +303,11 @@ class WordPdfConverter:
         except Exception:
             pass
 
-    def convert(self, html_text, pdf_path, tmp_dir):
-        tmp_html = os.path.join(
-            tmp_dir, "_tmp_{}.html".format(os.getpid()))
+    def convert(self, html_text, pdf_path):
+        os.makedirs(WORK_DIR, exist_ok=True)
+        stem = "ric_" + uuid.uuid4().hex
+        tmp_html = os.path.join(WORK_DIR, stem + ".html")
+        tmp_pdf = os.path.join(WORK_DIR, stem + ".pdf")
         with open(tmp_html, "w", encoding="utf-8") as fh:
             fh.write(html_text)
         doc = None
@@ -304,7 +315,8 @@ class WordPdfConverter:
             # ConfirmConversions=False, ReadOnly=True, AddToRecentFiles=False
             doc = self.word.Documents.Open(
                 tmp_html, False, True, False)
-            doc.ExportAsFixedFormat(pdf_path, WD_EXPORT_FORMAT_PDF)
+            # Esportiamo nella cartella locale, poi spostiamo a destinazione.
+            doc.ExportAsFixedFormat(tmp_pdf, WD_EXPORT_FORMAT_PDF)
         finally:
             if doc is not None:
                 try:
@@ -315,6 +327,8 @@ class WordPdfConverter:
                 os.remove(tmp_html)
             except Exception:
                 pass
+        # Sposta il PDF finito nella cartella scelta (anche su disco di rete).
+        shutil.move(tmp_pdf, pdf_path)
 
     def close(self):
         try:
@@ -333,24 +347,22 @@ class Pdf24Converter:
             raise RuntimeError(
                 "PDF24 non trovato in: {}".format(config.PDF24_DOCTOOL))
 
-    def convert(self, html_text, pdf_path, tmp_dir):
-        tmp_html = os.path.join(
-            tmp_dir, "_tmp_{}.html".format(os.getpid()))
+    def convert(self, html_text, pdf_path):
+        os.makedirs(WORK_DIR, exist_ok=True)
+        stem = "ric_" + uuid.uuid4().hex
+        tmp_html = os.path.join(WORK_DIR, stem + ".html")
         with open(tmp_html, "w", encoding="utf-8") as fh:
             fh.write(html_text)
         try:
-            out_dir = os.path.dirname(pdf_path)
             self._subprocess.run(
                 [config.PDF24_DOCTOOL, "-convertToPDF",
-                 "-outputDir", out_dir, tmp_html],
+                 "-outputDir", WORK_DIR, tmp_html],
                 check=True,
             )
-            produced = os.path.join(
-                out_dir,
-                os.path.splitext(os.path.basename(tmp_html))[0] + ".pdf",
-            )
+            produced = os.path.join(WORK_DIR, stem + ".pdf")
             if os.path.exists(produced):
-                os.replace(produced, pdf_path)
+                # Sposta il PDF finito nella cartella scelta.
+                shutil.move(produced, pdf_path)
         finally:
             try:
                 os.remove(tmp_html)
@@ -459,7 +471,7 @@ def run_processing(chosen_folder, target_day, log, progress):
                     pdf_path = unique_pdf_path(
                         dest_path, config.BASE_FILENAME)
                     html_text = build_email_html(mail)
-                    converter.convert(html_text, pdf_path, dest_path)
+                    converter.convert(html_text, pdf_path)
                     total_pdf += 1
                     log("    OK  {}  <-  {}".format(
                         os.path.basename(pdf_path),

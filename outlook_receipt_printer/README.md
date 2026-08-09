@@ -18,6 +18,23 @@ le salva, ordinate, nelle sottocartelle corrispondenti di una cartella scelta.
    corrispondente. Se ce n'è più di una: `bozza ad avv..pdf`,
    `bozza ad avv. (2).pdf`, `bozza ad avv. (3).pdf`, …
 
+## Scarica e clicca (senza installare nulla)
+
+L'eseguibile viene costruito automaticamente dai server di GitHub. Per ottenerlo:
+
+1. Vai alla pagina **Releases** del repository:
+   <https://github.com/vdicagno-ui/GLM-OCR/releases>
+2. Apri la release **"Stampa Ricevute PEC (ultima versione)"**.
+3. Scarica il file **`StampaRicevutePEC.exe`**.
+4. **Doppio clic** sul file. Fatto.
+
+> La prima compilazione parte dopo il push e richiede pochi minuti. Se la
+> release non c'è ancora, attendi che l'automazione (scheda **Actions** del
+> repository) termini.
+>
+> L'eseguibile funziona su Windows con **Outlook classico** e **Word**
+> installati; non richiede Python.
+
 ## Requisiti
 
 - **Windows** con **Microsoft Outlook** (classico, non "nuovo Outlook") già

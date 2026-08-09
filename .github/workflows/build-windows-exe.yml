@@ -1,0 +1,67 @@
+name: Costruisci eseguibile Windows (Stampa Ricevute PEC)
+
+# Compila l'app in un file .exe autonomo su una macchina Windows di GitHub
+# e lo pubblica come file scaricabile (artifact + release "app-latest").
+
+on:
+  push:
+    branches:
+      - claude/outlook-receipt-pdf-printer-heioou
+    paths:
+      - "outlook_receipt_printer/**"
+      - ".github/workflows/build-windows-exe.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout del codice
+        uses: actions/checkout@v4
+
+      - name: Installa Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installa dipendenze e PyInstaller
+        working-directory: outlook_receipt_printer
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+
+      - name: Compila l'eseguibile
+        working-directory: outlook_receipt_printer
+        run: >
+          pyinstaller --noconfirm --onefile --windowed
+          --name "StampaRicevutePEC"
+          --add-data "config.py;."
+          --hidden-import win32com
+          --hidden-import win32com.client
+          --hidden-import win32timezone
+          --hidden-import pythoncom
+          --hidden-import pywintypes
+          outlook_receipt_printer.py
+
+      - name: Pubblica come artifact scaricabile
+        uses: actions/upload-artifact@v4
+        with:
+          name: StampaRicevutePEC-exe
+          path: outlook_receipt_printer/dist/StampaRicevutePEC.exe
+          if-no-files-found: error
+
+      - name: Pubblica nella pagina Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: app-latest
+          name: Stampa Ricevute PEC (ultima versione)
+          body: |
+            Eseguibile Windows autonomo.
+            Scarica **StampaRicevutePEC.exe** qui sotto e fai doppio clic.
+            Richiede Windows con Outlook classico e Microsoft Word installati.
+          files: outlook_receipt_printer/dist/StampaRicevutePEC.exe

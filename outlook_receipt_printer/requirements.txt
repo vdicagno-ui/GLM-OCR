@@ -1,0 +1,3 @@
+# Dipendenze del programma "Stampa Ricevute PEC".
+# tkinter e' incluso nella libreria standard di Python (nessuna installazione).
+pywin32>=306

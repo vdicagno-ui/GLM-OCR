@@ -1,0 +1,7 @@
+# Dipendenze del Compilatore Template Word (offline).
+# tkinter NON è qui: è incluso in Python su Windows (nessuna installazione).
+python-docx>=1.1.0
+pypdf>=4.0.0
+
+# Solo per creare l'eseguibile .exe (non serve per l'uso normale):
+# pyinstaller>=6.0.0

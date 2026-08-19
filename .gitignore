@@ -28,3 +28,8 @@ Thumbs.db
 
 # Logs
 *.log
+
+# word_filler: generated example docs and PyInstaller artifacts
+word_filler/examples/*.docx
+*.spec
+

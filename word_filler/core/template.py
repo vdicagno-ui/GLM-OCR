@@ -26,21 +26,30 @@ from pathlib import Path
 # capture group 1. Group 0 (the whole match) is what gets replaced.
 
 PRESETS: dict[str, str] = {
-    # "da compilare nome cognome"  ->  field = "nome cognome"
-    # The label ends at a natural boundary: 2+ spaces, a tab, a newline, a
-    # comma/semicolon, a closing bracket, or end of text. It does NOT stop at a
-    # single '.' so descriptions like "nr. RG" stay intact; a trailing '.' is
-    # trimmed during normalisation.
-    "Etichetta «da compilare …»": r"(?i)da\s+compilare[\s:]+(.+?)(?=\s{2,}|\t|\r|\n|[,;)\]}]|$)",
+    # "[da compilare nome e cognome]"  ->  field = "nome e cognome"
+    # Strong delimiters: everything between the brackets is the label. The
+    # optional "da compilare" prefix inside is stripped during normalisation.
+    "Parentesi quadra [campo]": r"\[\s*([^\]\[]+?)\s*\]",
     # "{{nome cognome}}"  ->  field = "nome cognome"
     "Doppia graffa {{campo}}": r"\{\{\s*([^}]+?)\s*\}\}",
-    # "[nome cognome]"  ->  field = "nome cognome"
-    "Parentesi quadra [campo]": r"\[\s*([^\]\[]+?)\s*\]",
     # "«nome cognome»"  ->  field = "nome cognome"
     "Guillemet «campo»": r"«\s*([^»]+?)\s*»",
+    # "da compilare nome cognome"  ->  field = "nome cognome"
+    # No delimiters: the label ends at a natural boundary (2+ spaces, tab,
+    # newline, comma/semicolon, closing bracket, or end of text). Less robust
+    # than delimiter presets — prefer the bracket form when possible.
+    "Etichetta «da compilare …» (senza parentesi)": r"(?i)da\s+compilare[\s:]+(.+?)(?=\s{2,}|\t|\r|\n|[,;)\]}]|$)",
 }
 
-DEFAULT_PRESET = "Etichetta «da compilare …»"
+DEFAULT_PRESET = "Parentesi quadra [campo]"
+
+# Filler words that may precede the real data name inside a placeholder, e.g.
+# "[da compilare nome e cognome]" -> the field is really "nome e cognome".
+_FILLER_PREFIX = re.compile(
+    r"^(?:da\s+|dato\s+da\s+|dati\s+da\s+)?"
+    r"(?:compilare|inserire|riempire|indicare|specificare)\b[\s:.\-–—]*",
+    re.IGNORECASE,
+)
 
 
 def get_pattern(preset_or_regex: str) -> re.Pattern:
@@ -50,10 +59,19 @@ def get_pattern(preset_or_regex: str) -> re.Pattern:
 
 
 def _norm_key(text: str) -> str:
-    """Normalise a field description so equivalent labels collapse together."""
+    """Normalise a field description so equivalent labels collapse together.
+
+    Strips an optional "da compilare"/"da inserire"/… prefix so that
+    "[da compilare nome e cognome]" and "[nome e cognome]" yield the same
+    clean field name "nome e cognome".
+    """
     collapsed = re.sub(r"\s+", " ", text).strip()
+    stripped = _FILLER_PREFIX.sub("", collapsed).strip()
+    # If stripping removed everything (label was just "da compilare"), keep the
+    # original so the field is still visible to the user.
+    candidate = stripped if stripped else collapsed
     # Trim trailing sentence punctuation/quotes that isn't part of the label.
-    return collapsed.strip(" .,;:\"'»«")
+    return candidate.strip(" .,;:\"'»«")
 
 
 # ---------------------------------------------------------------------------

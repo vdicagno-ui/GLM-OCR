@@ -8,8 +8,13 @@ computer.
 
 ## Come funziona
 
-1. **Template Word** (`.docx`) con etichette segnaposto, per esempio:
-   > Il sottoscritto **da compilare nome cognome**, procedimento **da compilare nr. RG**, con incarico del **da compilare data di incarico**…
+1. **Template Word** (`.docx`) con segnaposto a **delimitatori forti**, dove
+   dentro le parentesi quadre scrivi la descrizione del dato, per esempio:
+   > Il sottoscritto **[da compilare nome e cognome]**, procedimento **[da compilare nr. RG]**, con incarico del **[da compilare data di incarico]**…
+
+   Le parentesi quadre eliminano ogni ambiguità sui confini del campo; nel
+   documento finale le parentesi vengono rimosse e il prefisso «da compilare»
+   non fa parte del nome del campo (il campo è «nome e cognome»).
 2. **Uno o più file guida** (`.docx`, `.pdf`, `.txt`, `.md`) da cui estrarre i valori.
 3. L'app estrae i dati **da ogni singolo file guida** e genera **un documento di
    output per ciascuno**. Ogni output usa i dati **solo** del proprio file guida.
@@ -54,12 +59,17 @@ dist\CompilatoreTemplateWord.exe
 
 1. Seleziona il **template Word**.
 2. Scegli il **formato delle etichette** dei segnaposto:
-   - *Etichetta «da compilare …»* (predefinito) → riconosce `da compilare nome cognome`
-   - *Doppia graffa* → `{{nome cognome}}`
-   - *Parentesi quadra* → `[nome cognome]`
-   - *Guillemet* → `«nome cognome»`
+   - *Parentesi quadra* (predefinito, consigliato) → `[da compilare nome e cognome]`
+   - *Doppia graffa* → `{{nome e cognome}}`
+   - *Guillemet* → `«nome e cognome»`
+   - *Etichetta «da compilare …» (senza parentesi)* → `da compilare nome cognome`
+     (meno robusto: usalo solo se il template non ha delimitatori)
    - oppure una **espressione regolare personalizzata** (il gruppo 1 cattura il
      nome del campo).
+
+   Con i formati a delimitatori il prefisso «da compilare» / «da inserire»
+   dentro le parentesi è opzionale e viene comunque tolto dal nome del campo:
+   `[da compilare nome e cognome]` e `[nome e cognome]` danno lo stesso campo.
 3. Premi **«Analizza template»**: mostra i campi rilevati.
 4. Aggiungi **uno o più file guida**.
 5. (Opzionale) Imposta cartella di output e suffisso del nome file.
@@ -75,11 +85,13 @@ dist\CompilatoreTemplateWord.exe
 
 ## Note sui segnaposto nel template
 
-- Nel formato *«da compilare …»* il nome del campo è il testo che segue
-  `da compilare` fino a **due o più spazi, una tabulazione o fine riga**. Così
-  descrizioni con un punto (es. `nr. RG`) restano integre. Se hai più campi
-  sulla stessa riga, separali con **almeno due spazi** o una tabulazione, oppure
-  usa un formato con delimitatori (`{{…}}`, `[…]`, `«…»`) più robusto.
+- **Consigliato:** usa i delimitatori a parentesi quadre `[ … ]`. Tutto ciò che
+  sta tra le parentesi è il campo, senza ambiguità sui confini; puoi mettere più
+  campi sulla stessa riga o dentro una frase. Il prefisso «da compilare» è
+  opzionale e viene rimosso dal nome del campo.
+- Il formato *«da compilare …» senza parentesi* è disponibile per compatibilità:
+  lì il nome del campo termina a **virgola, punto e virgola, due o più spazi,
+  tabulazione o fine riga**, quindi è meno affidabile per il testo inline.
 - L'app cerca i segnaposto anche dentro **tabelle, intestazioni e piè di pagina**.
 
 ## Privacy

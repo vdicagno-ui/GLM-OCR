@@ -11,7 +11,7 @@ CONFIG_PATH = CONFIG_DIR / "settings.json"
 DEFAULTS = {
     "endpoint": "http://localhost:1234/v1",
     "model": "",
-    "preset": "Etichetta «da compilare …»",
+    "preset": "Parentesi quadra [campo]",
     "custom_regex": "",
     "use_custom_regex": False,
     "use_ai": True,

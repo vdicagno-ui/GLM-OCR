@@ -10,6 +10,8 @@ from docx import Document
 
 from word_filler.core import extractor, guides, pipeline, template
 
+PHRASE_PRESET = "Etichetta «da compilare …» (senza parentesi)"
+
 
 def _make_template(path):
     doc = Document()
@@ -29,7 +31,7 @@ def test_scan_and_fill():
         out = os.path.join(d, "out.docx")
         _make_template(tpl)
 
-        preset = template.DEFAULT_PRESET
+        preset = PHRASE_PRESET
         fields = template.scan_placeholders(tpl, preset)
         assert "nome cognome" in fields, fields
         assert "nr. RG" in fields, fields
@@ -69,9 +71,9 @@ def test_run_split_placeholder():
         p.add_run("cognome")
         doc.save(tpl)
 
-        fields = template.scan_placeholders(tpl, template.DEFAULT_PRESET)
+        fields = template.scan_placeholders(tpl, PHRASE_PRESET)
         assert fields == ["nome cognome"], fields
-        template.fill_template(tpl, {"nome cognome": "Anna Bianchi"}, out, template.DEFAULT_PRESET)
+        template.fill_template(tpl, {"nome cognome": "Anna Bianchi"}, out, PHRASE_PRESET)
         res = Document(out)
         assert "Anna Bianchi" in res.paragraphs[0].text
         assert "da compilare" not in res.paragraphs[0].text
@@ -92,6 +94,44 @@ def test_bracket_preset():
         res = Document(out)
         assert "ACME" in res.paragraphs[0].text and "2026" in res.paragraphs[0].text
     print("test_bracket_preset OK")
+
+
+def test_bracket_with_prefix_default():
+    """Default preset: [da compilare nome e cognome] -> field 'nome e cognome'."""
+    with tempfile.TemporaryDirectory() as d:
+        tpl = os.path.join(d, "t.docx")
+        out = os.path.join(d, "o.docx")
+        doc = Document()
+        doc.add_paragraph("Il sottoscritto [da compilare nome e cognome], difensore,")
+        doc.add_paragraph("procedimento [da compilare nr. RG] presso [foro competente].")
+        doc.save(tpl)
+
+        preset = template.DEFAULT_PRESET  # "Parentesi quadra [campo]"
+        fields = template.scan_placeholders(tpl, preset)
+        # "da compilare" prefix stripped; label with/without prefix both clean.
+        assert set(fields) == {"nome e cognome", "nr. RG", "foro competente"}, fields
+
+        values = {
+            "nome e cognome": "Mario Rossi",
+            "nr. RG": "1234/2026",
+            "foro competente": "Milano",
+        }
+        template.fill_template(tpl, values, out, preset)
+        res = Document(out)
+        full = "\n".join(p.text for p in res.paragraphs)
+        assert "Mario Rossi" in full and "1234/2026" in full and "Milano" in full
+        assert "[" not in full and "]" not in full  # brackets removed
+        assert "da compilare" not in full
+    print("test_bracket_with_prefix_default OK")
+
+
+def test_norm_key_prefix_stripping():
+    from word_filler.core.template import _norm_key
+    assert _norm_key("da compilare nome e cognome") == "nome e cognome"
+    assert _norm_key("da  inserire   nr. RG") == "nr. RG"
+    assert _norm_key("nome e cognome") == "nome e cognome"
+    assert _norm_key("da compilare data di incarico.") == "data di incarico"
+    print("test_norm_key_prefix_stripping OK")
 
 
 def test_heuristic_extract():
@@ -140,6 +180,8 @@ if __name__ == "__main__":
     test_scan_and_fill()
     test_run_split_placeholder()
     test_bracket_preset()
+    test_bracket_with_prefix_default()
+    test_norm_key_prefix_stripping()
     test_heuristic_extract()
     test_json_parsing()
     test_pipeline_output_path()

@@ -26,12 +26,18 @@ DEFAULT_ENDPOINTS = {
 }
 
 SYSTEM_PROMPT = (
-    "Sei un assistente che estrae dati da un documento. "
+    "Sei un assistente che estrae dati da un documento, in ambito giuridico. "
     "Ricevi il testo di un documento guida e un elenco di campi da compilare. "
-    "Per ogni campo, individua nel documento il valore corrispondente. "
+    "Per ogni campo, individua nel documento il valore corrispondente, "
+    "leggendo TUTTO il testo, anche in fondo. "
+    "Attenzione ai campi con nomi molto simili: trattali come DISTINTI e non "
+    "confonderli (per esempio «giudice delegato» e «giudice delegante», oppure "
+    "«ricorrente» e «resistente»); assegna a ciascuno il valore giusto. "
+    "Considera le abbreviazioni comuni (es. «G.D.» = giudice delegato, "
+    "«Dott.»/«Dott.ssa» davanti a un nome, «R.G.» = numero di ruolo generale). "
     "Rispondi ESCLUSIVAMENTE con un oggetto JSON valido che mappa il nome "
-    "esatto di ogni campo al valore estratto (stringa). "
-    "Se un valore non è presente nel documento, usa una stringa vuota. "
+    "esatto di ogni campo (come fornito) al valore estratto (stringa). "
+    "Se un valore non è davvero presente nel documento, usa una stringa vuota. "
     "Non aggiungere spiegazioni, commenti o testo fuori dal JSON."
 )
 
@@ -86,7 +92,7 @@ def ai_extract(
     guide_text: str,
     fields: list[str],
     timeout: int = 180,
-    max_chars: int = 24000,
+    max_chars: int = 40000,
 ) -> dict[str, str]:
     """Ask the local model to extract ``fields`` from ``guide_text``.
 
@@ -95,11 +101,15 @@ def ai_extract(
     back or surface the error.
     """
     base_url = base_url.rstrip("/")
-    # Guard against oversized context: keep the head of the document, which is
-    # where identifying data usually lives.
+    # Guard against oversized context. Identifying data (names, judges, dates)
+    # can appear either at the top OR at the very end of a decree, so when the
+    # document is too long we keep both the head and the tail rather than only
+    # the beginning.
     text = guide_text.strip()
     if len(text) > max_chars:
-        text = text[:max_chars]
+        head = text[: int(max_chars * 0.7)]
+        tail = text[-int(max_chars * 0.3):]
+        text = f"{head}\n[...]\n{tail}"
 
     fields_block = "\n".join(f"- {f}" for f in fields)
     user_prompt = (

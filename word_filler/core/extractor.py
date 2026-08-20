@@ -41,7 +41,33 @@ SYSTEM_PROMPT = (
     "Rispondi ESCLUSIVAMENTE con un oggetto JSON valido che mappa il nome "
     "esatto di ogni campo (come fornito) al valore estratto (stringa). "
     "Se un valore non è davvero presente nel documento, usa una stringa vuota. "
+    "REGOLA IMPORTANTE: la prima riga (o le prime righe) del documento sono "
+    "l'INTESTAZIONE del mittente (di solito il nome dell'avvocato o dello "
+    "studio) e NON vanno MAI usate come valore dei campi. Prendi il valore di "
+    "un campo SOLO dal testo che segue l'etichetta corrispondente presente nel "
+    "documento (es. il valore di «giudice delegato» è il nome che segue "
+    "l'etichetta «Giudice Delegato» / «G.D.», non il nome nell'intestazione). "
+    "Se per un campo non trovi un'etichetta corrispondente, lascia la stringa "
+    "vuota invece di indovinare. "
     "Non aggiungere spiegazioni, commenti o testo fuori dal JSON."
+)
+
+# A tiny worked example steers small local models away from the letterhead trap.
+FEWSHOT_USER = (
+    "CAMPI DA ESTRARRE:\n- nome e cognome\n- giudice delegato\n- giudice delegante\n\n"
+    "DOCUMENTO GUIDA:\n\"\"\"\n"
+    "Avv. Giulia Verdi - Foro di Napoli\n"
+    "TRIBUNALE DI NAPOLI - Sezione Fallimentare\n"
+    "Giudice Delegato: Dott. Marco Esposito\n"
+    "Giudice Delegante: Dott.ssa Anna Ferrari\n"
+    "Ricorrente: Mario Bianchi\n"
+    "\"\"\"\n\n"
+    "Restituisci solo il JSON."
+)
+FEWSHOT_ASSISTANT = (
+    '{"nome e cognome": "Mario Bianchi", '
+    '"giudice delegato": "Dott. Marco Esposito", '
+    '"giudice delegante": "Dott.ssa Anna Ferrari"}'
 )
 
 
@@ -125,6 +151,8 @@ def ai_extract(
         "model": model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": FEWSHOT_USER},
+            {"role": "assistant", "content": FEWSHOT_ASSISTANT},
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0,
@@ -186,28 +214,61 @@ def _parse_json_object(content: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def heuristic_extract(guide_text: str, fields: list[str]) -> dict[str, str]:
-    """Best-effort extraction without AI: look for 'label: value' style lines.
+    """Best-effort extraction without AI, anchored on the field LABEL.
 
-    For each field it searches for a line whose start resembles the field name
-    and returns the text after the ':' separator. Always returns every field
-    (empty string when nothing is found) so the review table stays complete.
+    For each field it locates the label in the document (the field words, e.g.
+    "Giudice Delegato") and takes the value that follows it — after a ':' or on
+    the same/next line. Because it keys off the label, it never mistakes the
+    letterhead (e.g. the sender's name at the top) for a value: that line does
+    not contain the label words.
+
+    Always returns every field (empty string when nothing is found) so the
+    review table stays complete.
     """
     lines = [ln.strip() for ln in guide_text.splitlines() if ln.strip()]
     result: dict[str, str] = {f: "" for f in fields}
 
     for field in fields:
-        # Build a loose token set from the field description.
         tokens = [t for t in re.split(r"\s+", field.lower()) if len(t) > 1]
         if not tokens:
             continue
+        # Phrase form of the field, for a contiguous-label match. Join the
+        # escaped words with \s+ so any spacing in the document still matches.
+        phrase = r"\s+".join(re.escape(w) for w in field.split())
+        phrase_re = re.compile(phrase, re.IGNORECASE)
+
         best = ""
-        for line in lines:
+        for i, line in enumerate(lines):
             low = line.lower()
-            if all(tok in low for tok in tokens) and ":" in line:
-                candidate = line.split(":", 1)[1].strip()
-                if candidate:
-                    best = candidate
-                    break
+            # The line must contain the label (all significant tokens).
+            if not all(tok in low for tok in tokens):
+                continue
+
+            value = ""
+            m = phrase_re.search(line)
+            if m:
+                # Value = text right after the contiguous label on this line.
+                value = _clean_value(line[m.end():])
+            if not value and ":" in line:
+                value = _clean_value(line.split(":", 1)[1])
+            # Label alone on its line: value is on the next non-empty line.
+            if not value and i + 1 < len(lines):
+                nxt = lines[i + 1]
+                if not all(tok in nxt.lower() for tok in tokens):
+                    value = _clean_value(nxt)
+
+            if value:
+                best = value
+                break
         result[field] = best
 
     return result
+
+
+def _clean_value(text: str) -> str:
+    """Trim a captured value of leading separators and trailing noise."""
+    text = text.strip()
+    text = re.sub(r"^[\s:.\-–—=»)]+", "", text).strip()
+    # Keep it to a single line / reasonable length.
+    text = text.splitlines()[0].strip() if text else text
+    return text.strip(" .,;")

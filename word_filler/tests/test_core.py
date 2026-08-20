@@ -144,6 +144,32 @@ def test_heuristic_extract():
     print("test_heuristic_extract OK")
 
 
+def test_heuristic_judges_and_letterhead():
+    # First line is the sender's name (letterhead): it must NOT leak into the
+    # judge fields, which are anchored on their labels.
+    text = (
+        "Avv. Vincenzo Di Cagno - Foro di Bari\n"
+        "TRIBUNALE DI BARI - Sezione Fallimentare\n"
+        "Giudice Delegato: Dott. Marco Esposito\n"
+        "Giudice Delegante Dott.ssa Anna Ferrari\n"  # no colon
+    )
+    fields = ["nome e cognome", "giudice delegato", "giudice delegante"]
+    vals = extractor.heuristic_extract(text, fields)
+    assert vals["giudice delegato"] == "Dott. Marco Esposito", vals
+    assert vals["giudice delegante"] == "Dott.ssa Anna Ferrari", vals
+    # The sender name is not grabbed by any judge field.
+    assert "Di Cagno" not in vals["giudice delegato"]
+    assert "Di Cagno" not in vals["giudice delegante"]
+    print("test_heuristic_judges_and_letterhead OK")
+
+
+def test_heuristic_label_on_own_line():
+    text = "Giudice Delegato\nDott. Paolo Neri\n"
+    vals = extractor.heuristic_extract(text, ["giudice delegato"])
+    assert vals["giudice delegato"] == "Dott. Paolo Neri", vals
+    print("test_heuristic_label_on_own_line OK")
+
+
 def test_json_parsing():
     assert extractor._parse_json_object('{"a": "1"}') == {"a": "1"}
     assert extractor._parse_json_object('```json\n{"a": "1"}\n```') == {"a": "1"}
@@ -216,6 +242,8 @@ if __name__ == "__main__":
     test_bracket_with_prefix_default()
     test_norm_key_prefix_stripping()
     test_heuristic_extract()
+    test_heuristic_judges_and_letterhead()
+    test_heuristic_label_on_own_line()
     test_json_parsing()
     test_pipeline_output_path()
     test_first_page_only_docx_pagebreak()

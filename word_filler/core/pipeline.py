@@ -56,12 +56,19 @@ def extract_for_guide(
                 fields=fields,
             )
             result.used_ai = True
-            return result
         except Exception as exc:
             # AI failed: keep going with the heuristic and report why.
             result.error = str(exc)
+            result.values = extractor.heuristic_extract(text, fields)
+    else:
+        result.values = extractor.heuristic_extract(text, fields)
 
-    result.values = extractor.heuristic_extract(text, fields)
+    # Judge fields (giudice delegato/delegante) are named only by title in some
+    # documents; resolve them deterministically from context cues and let the
+    # result override the weaker AI/heuristic guess when a name is found.
+    if cfg.get("resolve_judges", True):
+        result.values = extractor.resolve_judge_fields(text, fields, result.values)
+
     return result
 
 

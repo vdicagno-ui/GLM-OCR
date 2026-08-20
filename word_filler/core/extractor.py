@@ -272,3 +272,92 @@ def _clean_value(text: str) -> str:
     # Keep it to a single line / reasonable length.
     text = text.splitlines()[0].strip() if text else text
     return text.strip(" .,;")
+
+
+# ---------------------------------------------------------------------------
+# Contextual resolver for judge names given only by their title (dott./dott.ssa)
+# ---------------------------------------------------------------------------
+#
+# Some documents never write the labels "Giudice Delegato/Delegante". The judges
+# appear only as "dott." / "dott.ssa <name>" and their role is understood from
+# nearby context words:
+#   * the DELEGATED judge (giudice delegato) follows "Giudice Onorario di Pace";
+#   * the DELEGATING judge (giudice delegante) follows "su delega" / "della".
+# We detect the "dott." name that appears at/after each context cue. Titles like
+# "Avv." (the sender's own letterhead) are ignored because we only match "dott.".
+
+# Match a name introduced by a doctor title, up to end of line.
+_NAME_TITLE_RE = re.compile(r"(?:dott|dr)\.?(?:\s*\.?\s*ssa)?\.?\s+\S.*", re.IGNORECASE)
+
+# Context cues per judge role. Keys are matched against the (normalised) field
+# name; the first matching entry decides which cues to use. Cues are matched as
+# whole words so "delega" does not accidentally match "delegato"/"delegante".
+JUDGE_CUES: list[tuple[tuple[str, ...], list[str]]] = [
+    # (field-name substrings that select this rule, context cue words)
+    (("delegante",), ["su delega", "delega", "della", "del"]),
+    (("delegato", "onorario"), ["giudice onorario di pace", "onorario di pace", "onorario"]),
+]
+
+
+def _clean_name(text: str) -> str:
+    """Clean a captured 'dott. ...' name: keep the title, drop trailing noise."""
+    m = _NAME_TITLE_RE.search(text)
+    if m:
+        text = text[m.start():]
+    return text.strip().strip(" .,;-–—)")
+
+
+def _field_cues(field: str) -> list[str] | None:
+    low = field.lower()
+    for needles, cues in JUDGE_CUES:
+        if any(n in low for n in needles):
+            return cues
+    return None
+
+
+def find_name_after(lines: list[str], cues: list[str], lookahead: int = 5) -> str:
+    """Return the first 'dott./dott.ssa <name>' at or after a context cue.
+
+    Searches for the earliest line containing any cue (as a whole word); from
+    that line onward (up to ``lookahead`` lines) returns the first doctor-title
+    name found. Returns "" when no cue or no name is present.
+    """
+    cue_res = [re.compile(r"\b" + re.escape(c) + r"\b", re.IGNORECASE) for c in cues]
+
+    for i, line in enumerate(lines):
+        hit = next((r.search(line) for r in cue_res if r.search(line)), None)
+        if not hit:
+            continue
+        # 1) name on the same line, after the cue.
+        after = line[hit.end():]
+        m = _NAME_TITLE_RE.search(after)
+        if m:
+            return _clean_name(after[m.start():])
+        # 2) name on one of the following lines.
+        for j in range(i + 1, min(i + 1 + lookahead, len(lines))):
+            m = _NAME_TITLE_RE.search(lines[j])
+            if m:
+                return _clean_name(lines[j][m.start():])
+        # Cue found but no name nearby: stop; don't chase distant text.
+        return ""
+    return ""
+
+
+def resolve_judge_fields(
+    guide_text: str, fields: list[str], values: dict[str, str]
+) -> dict[str, str]:
+    """Fill judge fields from context cues, overriding weak/empty guesses.
+
+    Only touches fields recognised as judge roles (delegante/delegato/onorario).
+    Returns a new dict; non-judge fields are left exactly as in ``values``.
+    """
+    lines = [ln.strip() for ln in guide_text.splitlines() if ln.strip()]
+    out = dict(values)
+    for field in fields:
+        cues = _field_cues(field)
+        if cues is None:
+            continue
+        name = find_name_after(lines, cues)
+        if name:
+            out[field] = name
+    return out

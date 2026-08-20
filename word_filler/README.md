@@ -100,6 +100,23 @@ dist\CompilatoreTemplateWord.exe
   tabulazione o fine riga**, quindi è meno affidabile per il testo inline.
 - L'app cerca i segnaposto anche dentro **tabelle, intestazioni e piè di pagina**.
 
+## Riconoscimento automatico dei giudici (delegato / delegante)
+
+In molti atti i giudici **non hanno un'etichetta** e compaiono solo come
+`dott.`/`dott.ssa`, con il ruolo deducibile dal contesto. L'opzione
+*«Riconosci i giudici dal contesto»* (attiva di default) applica queste regole,
+in modo deterministico e senza AI:
+
+- **giudice delegato** = il nome `dott./dott.ssa` che segue «Giudice Onorario di Pace»;
+- **giudice delegante** = il nome `dott./dott.ssa` che segue «su delega» / «della»;
+- l'intestazione del mittente (`Avv. …`) viene ignorata (si cercano solo i `dott.`);
+- se c'è un solo giudice senza delega, il delegante resta vuoto.
+
+Perché funzioni, i campi nel template devono contenere le parole
+**«delegato»** e **«delegante»** (es. `[da compilare giudice delegato]`,
+`[da compilare giudice delegante]`). Questo riconoscimento **sovrascrive** il
+valore dell'AI per quei campi, perché sul formato tipico è più affidabile.
+
 ## Risoluzione problemi
 
 - **«Prova connessione» resta senza esito / non diventa verde.** Significa che

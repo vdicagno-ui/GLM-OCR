@@ -163,6 +163,41 @@ def test_heuristic_judges_and_letterhead():
     print("test_heuristic_judges_and_letterhead OK")
 
 
+def test_resolve_judges_by_context():
+    """Real-world layout: judges named only by title, roles given by context."""
+    text = (
+        "Ill.mo Giudice Onorario di Pace\n"
+        "dott.ssa Maria Rosaria OOOO\n"
+        "                 su delega\n"
+        "della dott.ssa Maria Luisa TTTTT\n"
+        "Tribunale Civile e Penale di Bari\n"
+        "          Sezione Lavoro\n"
+    )
+    fields = ["nome e cognome", "giudice delegato", "giudice delegante"]
+    # Start from empty/weak values (as a small AI model might produce).
+    values = {"nome e cognome": "Avv. Tizio", "giudice delegato": "", "giudice delegante": ""}
+    out = extractor.resolve_judge_fields(text, fields, values)
+    assert out["giudice delegato"] == "dott.ssa Maria Rosaria OOOO", out
+    assert out["giudice delegante"] == "dott.ssa Maria Luisa TTTTT", out
+    # Non-judge field untouched.
+    assert out["nome e cognome"] == "Avv. Tizio"
+    print("test_resolve_judges_by_context OK")
+
+
+def test_resolve_judges_single_no_delega():
+    """Single judge, no delegation: fill delegato, leave delegante empty."""
+    text = (
+        "Ill.mo Giudice Onorario di Pace\n"
+        "dott. Paolo Neri\n"
+        "Tribunale Civile e Penale di Bari - Sezione Lavoro\n"
+    )
+    fields = ["giudice delegato", "giudice delegante"]
+    out = extractor.resolve_judge_fields(text, fields, {f: "" for f in fields})
+    assert out["giudice delegato"] == "dott. Paolo Neri", out
+    assert out["giudice delegante"] == "", out
+    print("test_resolve_judges_single_no_delega OK")
+
+
 def test_heuristic_label_on_own_line():
     text = "Giudice Delegato\nDott. Paolo Neri\n"
     vals = extractor.heuristic_extract(text, ["giudice delegato"])
@@ -243,6 +278,8 @@ if __name__ == "__main__":
     test_norm_key_prefix_stripping()
     test_heuristic_extract()
     test_heuristic_judges_and_letterhead()
+    test_resolve_judges_by_context()
+    test_resolve_judges_single_no_delega()
     test_heuristic_label_on_own_line()
     test_json_parsing()
     test_pipeline_output_path()

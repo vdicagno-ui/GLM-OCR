@@ -225,6 +225,14 @@ class WordFillerApp:
             variable=self.first_page_only_var,
         ).pack(anchor="w", pady=(6, 0))
 
+        self.resolve_judges_var = tk.BooleanVar(value=self.cfg.get("resolve_judges", True))
+        ttk.Checkbutton(
+            gf,
+            text="Riconosci i giudici dal contesto (delegato = «onorario di pace», "
+                 "delegante = «su delega»)",
+            variable=self.resolve_judges_var,
+        ).pack(anchor="w", pady=(2, 0))
+
         # --- Output --------------------------------------------------------
         out = ttk.LabelFrame(parent, text="Output", padding=8)
         out.pack(fill="x", pady=(8, 0))
@@ -391,6 +399,7 @@ class WordFillerApp:
             "use_custom_regex": bool(self.use_custom_regex_var.get()),
             "use_ai": bool(self.use_ai_var.get()),
             "first_page_only": bool(self.first_page_only_var.get()),
+            "resolve_judges": bool(self.resolve_judges_var.get()),
             "output_dir": self.output_dir_var.get().strip(),
             "output_suffix": self.suffix_var.get().strip() or "_compilato",
         })

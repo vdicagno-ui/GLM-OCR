@@ -15,6 +15,7 @@ DEFAULTS = {
     "custom_regex": "",
     "use_custom_regex": False,
     "use_ai": True,
+    "first_page_only": True,
     "output_dir": "",
     "output_suffix": "_compilato",
 }

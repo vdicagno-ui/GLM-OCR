@@ -72,16 +72,22 @@ dist\CompilatoreTemplateWord.exe
    `[da compilare nome e cognome]` e `[nome e cognome]` danno lo stesso campo.
 3. Premi **«Analizza template»**: mostra i campi rilevati.
 4. Aggiungi **uno o più file guida**.
-5. (Opzionale) Imposta cartella di output e suffisso del nome file.
-6. **AI locale:** scegli l'endpoint (LM Studio `:1234` o Ollama `:11434`),
+5. (Opzionale) *«Leggi solo la prima pagina del file guida»* (attivo di
+   default): utile quando i file guida sono lunghi ma i dati che servono stanno
+   in alto, subito sotto l'intestazione — legge solo la 1ª pagina (pagina 1 per
+   i PDF; fino al primo salto pagina, o un limite di caratteri, per gli altri
+   formati). Migliora precisione e velocità. Togli la spunta se i dati possono
+   trovarsi anche più avanti nel documento.
+7. (Opzionale) Imposta cartella di output e suffisso del nome file.
+8. **AI locale:** scegli l'endpoint (LM Studio `:1234` o Ollama `:11434`),
    premi **«Prova connessione»** e, se vuoi, seleziona il modello.
    Se disattivi l'AI, viene usata un'euristica offline (righe tipo `Etichetta: valore`).
-7. Premi **«Estrai dati dai file guida»**.
+9. Premi **«Estrai dati dai file guida»**.
 
 **Scheda «2 · Revisione e generazione»**
 
-8. Scegli un file guida dall'elenco e **controlla/correggi** i valori.
-9. Premi **«Genera tutti i documenti»**.
+10. Scegli un file guida dall'elenco e **controlla/correggi** i valori.
+11. Premi **«Genera tutti i documenti»**.
 
 ## Note sui segnaposto nel template
 

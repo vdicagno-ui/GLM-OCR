@@ -39,7 +39,9 @@ def extract_for_guide(
     """Read a guide file and extract values for ``fields`` (AI or heuristic)."""
     result = ExtractionResult(guide_path=guide_path)
     try:
-        text = guides.read_guide_text(guide_path)
+        text = guides.read_guide_text(
+            guide_path, first_page_only=bool(cfg.get("first_page_only", True))
+        )
     except Exception as exc:
         result.error = f"Lettura file guida fallita: {exc}"
         result.values = {f: "" for f in fields}

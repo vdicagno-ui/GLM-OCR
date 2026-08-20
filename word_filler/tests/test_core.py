@@ -161,6 +161,39 @@ def test_pipeline_output_path():
     print("test_pipeline_output_path OK")
 
 
+def test_first_page_only_docx_pagebreak():
+    from docx import Document as Doc
+    from docx.enum.text import WD_BREAK
+    with tempfile.TemporaryDirectory() as d:
+        dx = os.path.join(d, "g.docx")
+        doc = Doc()
+        doc.add_paragraph("TRIBUNALE DI ESEMPIO")
+        doc.add_paragraph("Giudice Delegato: Dott. Rossi")
+        doc.add_paragraph("Giudice Delegante: Dott. Bianchi")
+        p = doc.add_paragraph()
+        p.add_run().add_break(WD_BREAK.PAGE)
+        doc.add_paragraph("Contenuto della seconda pagina, molto lungo, da ignorare.")
+        doc.save(dx)
+
+        full = guides.read_guide_text(dx, first_page_only=False)
+        assert "seconda pagina" in full
+        first = guides.read_guide_text(dx, first_page_only=True)
+        assert "Giudice Delegato" in first and "Giudice Delegante" in first
+        assert "seconda pagina" not in first
+    print("test_first_page_only_docx_pagebreak OK")
+
+
+def test_first_page_only_char_cap():
+    with tempfile.TemporaryDirectory() as d:
+        txt = os.path.join(d, "g.txt")
+        header = "Intestazione\nGiudice Delegato: Rossi\n"
+        open(txt, "w", encoding="utf-8").write(header + ("x" * 10000))
+        first = guides.read_guide_text(txt, first_page_only=True)
+        assert "Giudice Delegato: Rossi" in first
+        assert len(first) <= guides.FIRST_PAGE_CHAR_CAP
+    print("test_first_page_only_char_cap OK")
+
+
 def test_guide_reading():
     with tempfile.TemporaryDirectory() as d:
         # txt
@@ -185,5 +218,7 @@ if __name__ == "__main__":
     test_heuristic_extract()
     test_json_parsing()
     test_pipeline_output_path()
+    test_first_page_only_docx_pagebreak()
+    test_first_page_only_char_cap()
     test_guide_reading()
     print("\nTutti i test superati.")

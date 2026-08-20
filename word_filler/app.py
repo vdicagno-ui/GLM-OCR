@@ -218,6 +218,13 @@ class WordFillerApp:
         ttk.Button(gbtns, text="Rimuovi selezionati", command=self._remove_guides).pack(side="left", padx=6)
         ttk.Button(gbtns, text="Svuota", command=self._clear_guides).pack(side="left")
 
+        self.first_page_only_var = tk.BooleanVar(value=self.cfg.get("first_page_only", True))
+        ttk.Checkbutton(
+            gf,
+            text="Leggi solo la prima pagina del file guida (consigliato per documenti lunghi)",
+            variable=self.first_page_only_var,
+        ).pack(anchor="w", pady=(6, 0))
+
         # --- Output --------------------------------------------------------
         out = ttk.LabelFrame(parent, text="Output", padding=8)
         out.pack(fill="x", pady=(8, 0))
@@ -383,6 +390,7 @@ class WordFillerApp:
             "custom_regex": self.custom_regex_var.get().strip(),
             "use_custom_regex": bool(self.use_custom_regex_var.get()),
             "use_ai": bool(self.use_ai_var.get()),
+            "first_page_only": bool(self.first_page_only_var.get()),
             "output_dir": self.output_dir_var.get().strip(),
             "output_suffix": self.suffix_var.get().strip() or "_compilato",
         })

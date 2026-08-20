@@ -21,14 +21,20 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-# Support both "python -m word_filler.app" and "python app.py".
-try:
-    from .core import config, extractor, pipeline, template
-except ImportError:  # pragma: no cover - direct-script execution
-    import os
-    import sys
+# Import the core package so it works in every launch mode:
+#  * "python app.py"          -> the script dir is on sys.path, "core" imports
+#  * a PyInstaller .exe        -> the bundle root is on sys.path, "core" imports
+#  * "python -m word_filler.app" (from repo root) -> relative import works
+import os as _os
+import sys as _sys
 
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_HERE = _os.path.dirname(_os.path.abspath(__file__))
+if _HERE not in _sys.path:
+    _sys.path.insert(0, _HERE)
+
+try:
+    from core import config, extractor, pipeline, template
+except ImportError:  # pragma: no cover - package-style execution
     from word_filler.core import config, extractor, pipeline, template
 
 
@@ -79,17 +85,77 @@ class WordFillerApp:
         notebook.add(self.tab_review, text="  2 · Revisione e generazione  ")
         self.notebook = notebook
 
-        self._build_setup_tab(self.tab_setup)
+        # Fixed action bar at the bottom of the setup tab: the primary button
+        # stays visible even if the form above is scrolled.
+        setup_bar = ttk.Frame(self.tab_setup, padding=(0, 6, 0, 0))
+        setup_bar.pack(side="bottom", fill="x")
+        self.extract_btn = ttk.Button(
+            setup_bar, text="▶  Estrai dati dai file guida", command=self._start_extraction
+        )
+        self.extract_btn.pack(side="right")
+        self.setup_hint = ttk.Label(
+            setup_bar, text="Compila i campi qui sopra, poi premi «Estrai dati».",
+            foreground="#555",
+        )
+        self.setup_hint.pack(side="left")
+
+        # The setup tab holds a lot of content: make it scrollable so nothing
+        # is ever clipped off the bottom.
+        setup_inner = self._make_scrollable(self.tab_setup)
+        self._build_setup_tab(setup_inner)
         self._build_review_tab(self.tab_review)
 
         # Log ---------------------------------------------------------------
         log_frame = ttk.LabelFrame(outer, text="Registro attività", padding=6)
         log_frame.pack(fill="x", pady=(8, 0))
-        self.log_text = tk.Text(log_frame, height=7, wrap="word", state="disabled")
+        self.log_text = tk.Text(log_frame, height=6, wrap="word", state="disabled")
         self.log_text.pack(side="left", fill="both", expand=True)
         log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         log_scroll.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=log_scroll.set)
+
+    def _make_scrollable(self, parent):
+        """Wrap ``parent`` with a vertical scrollbar; return the inner frame
+        into which content should be packed."""
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(parent, command=canvas.yview)
+        scroll.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scroll.set)
+
+        inner = ttk.Frame(canvas, padding=(0, 0, 8, 0))
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfigure(window, width=e.width),
+        )
+
+        # Mouse-wheel scrolling while the pointer is over the canvas.
+        def _on_wheel(event):
+            delta = -1 if getattr(event, "delta", 0) > 0 else 1
+            if getattr(event, "num", None) == 4:  # Linux scroll up
+                delta = -1
+            elif getattr(event, "num", None) == 5:  # Linux scroll down
+                delta = 1
+            canvas.yview_scroll(delta, "units")
+
+        def _bind_wheel(_):
+            canvas.bind_all("<MouseWheel>", _on_wheel)
+            canvas.bind_all("<Button-4>", _on_wheel)
+            canvas.bind_all("<Button-5>", _on_wheel)
+
+        def _unbind_wheel(_):
+            canvas.unbind_all("<MouseWheel>")
+            canvas.unbind_all("<Button-4>")
+            canvas.unbind_all("<Button-5>")
+
+        canvas.bind("<Enter>", _bind_wheel)
+        canvas.bind("<Leave>", _unbind_wheel)
+        return inner
 
     def _build_setup_tab(self, parent):
         # --- Template ------------------------------------------------------
@@ -194,12 +260,6 @@ class WordFillerApp:
         self.ai_status = ttk.Label(ai, text="", foreground="#444")
         self.ai_status.grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
         ai.columnconfigure(1, weight=1)
-
-        # --- Main action ---------------------------------------------------
-        self.extract_btn = ttk.Button(
-            parent, text="▶  Estrai dati dai file guida", command=self._start_extraction
-        )
-        self.extract_btn.pack(anchor="w", pady=(10, 0))
 
         self._toggle_regex()
 

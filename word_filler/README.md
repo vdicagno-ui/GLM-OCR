@@ -94,6 +94,25 @@ dist\CompilatoreTemplateWord.exe
   tabulazione o fine riga**, quindi è meno affidabile per il testo inline.
 - L'app cerca i segnaposto anche dentro **tabelle, intestazioni e piè di pagina**.
 
+## Risoluzione problemi
+
+- **«Prova connessione» resta senza esito / non diventa verde.** Significa che
+  non è in ascolto nessun server AI locale all'indirizzo indicato. Serve avere
+  **LM Studio** (con il *Local Server* avviato) oppure **Ollama** in esecuzione,
+  con un modello caricato. Verde = connesso; rosso = server non raggiungibile.
+  Puoi anche lavorare **senza AI**: togli la spunta *«Usa AI locale»* (vedi sotto).
+- **Non vedo il pulsante «Estrai dati».** Ora è in una **barra fissa in fondo**
+  alla scheda «1 · Configurazione», sempre visibile; il resto del modulo è
+  scorrevole (rotellina del mouse o barra laterale).
+- **Voglio usarlo senza AI.** Togli la spunta *«Usa AI locale»*: l'estrazione
+  usa un'euristica che funziona quando nei file guida i dati sono su righe del
+  tipo `Nome e cognome: Mario Rossi`, `Nr. RG: 1234/2026`. In ogni caso, nella
+  scheda «2 · Revisione» puoi correggere o inserire a mano ogni valore prima di
+  generare i documenti.
+- **L'`.exe` dà errore all'avvio.** Ricrea l'eseguibile con `build_exe.bat`
+  aggiornato (include `lxml`, necessario a python-docx). Se l'errore persiste,
+  usa `run_app.bat`, che è equivalente e non richiede la compilazione.
+
 ## Privacy
 
 Tutto avviene in locale. Le chiamate all'AI vanno solo all'indirizzo locale

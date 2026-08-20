@@ -19,8 +19,11 @@ python -m PyInstaller ^
   --onefile ^
   --windowed ^
   --name "CompilatoreTemplateWord" ^
+  --paths . ^
+  --collect-submodules core ^
   --collect-all docx ^
   --collect-all pypdf ^
+  --collect-all lxml ^
   app.py
 if errorlevel 1 goto :error
 

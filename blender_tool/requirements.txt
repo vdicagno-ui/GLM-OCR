@@ -1,0 +1,4 @@
+# Dipendenze per lo sviluppo/packaging della GUI.
+# tkinter NON e' qui: e' incluso nella libreria standard di Python su Windows.
+# bpy NON e' qui: e' fornito da Blender stesso (lo script gira dentro Blender).
+pyinstaller>=6.0

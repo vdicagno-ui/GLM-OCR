@@ -1,0 +1,11 @@
+# Log di fotogrammetria d'esempio (formato generico CSV: x,y,z)
+# Ogni riga = posizione di una telecamera nello spazio 3D.
+# La GUI puo' passare questo file con --log, oppure lo script lo simula.
+3.0,0.0,1.5
+2.1,2.1,1.5
+0.0,3.0,1.5
+-2.1,2.1,1.5
+-3.0,0.0,1.5
+-2.1,-2.1,1.5
+0.0,-3.0,1.5
+2.1,-2.1,1.5

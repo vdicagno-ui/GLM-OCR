@@ -4,24 +4,27 @@ Script eseguito DENTRO Blender in modalita' headless.
 Viene lanciato dalla GUI (gui.py) con:
 
     blender --background --factory-startup --python blender_render.py -- \
-        --obj MODELLO.obj --out CARTELLA_OUTPUT --images CARTELLA_FOTO \
-        [--log FILE_LOG] [--cameras N] [--resx 1920] [--resy 1080] \
-        [--engine BLENDER_EEVEE] [--format PNG]
+        --obj MODELLO.obj --out CARTELLA_OUTPUT \
+        [--sfm cameras.sfm] [--images CARTELLA_FOTO] \
+        [--cameras N] [--engine BLENDER_EEVEE] [--format PNG] [--no-bg-sample]
 
-Cosa fa:
+Cosa fa (replica dello "stile" con rig coerente):
     1. Carica il file .obj indicato.
-    2. Configura una serie di telecamere:
-         - se viene fornito un log di fotogrammetria (o ne trova uno nella
-           cartella immagini) legge da li' le coordinate delle camere;
-         - altrimenti simula le coordinate disponendo le camere su un anello
-           attorno all'oggetto.
-    3. Imposta un materiale standard (Principled BSDF) su tutte le mesh e una
-       luce fissa (Sun) per ombre e stile ripetibili.
-    4. Renderizza un frame per ogni telecamera salvandolo nella cartella output.
+    2. Configura le telecamere:
+         - se viene fornito un file SfM (.sfm/.json AliceVision, o images.txt
+           COLMAP, o CSV x,y,z) ricostruisce posa + focale + risoluzione reali
+           di ogni scatto originale;
+         - altrimenti simula le camere su un anello attorno all'oggetto.
+    3. Applica un materiale standard (Principled BSDF neutro) a tutte le mesh e
+       una luce fissa (Sun) per ombre e stile ripetibili. Lo sfondo del mondo
+       viene campionato dal colore medio delle foto originali (se disponibili),
+       cosi' i render nascono su una base cromatica simile.
+    4. Renderizza un frame per ogni telecamera, alla stessa risoluzione dello
+       scatto originale, salvandolo nella cartella di output con il nome della
+       foto sorgente corrispondente.
 
-Nota: usa solo l'API ``bpy`` di Blender, quindi va eseguito tramite Blender e
-non con un interprete Python normale. E' compatibile sia con Blender 3.x sia
-con 4.x (import .obj e nomi engine differiscono tra le versioni).
+Usa solo l'API ``bpy``: va eseguito tramite Blender, non con Python normale.
+Compatibile con Blender 3.x e 4.x.
 """
 
 import argparse
@@ -36,42 +39,42 @@ import mathutils
 
 
 # ---------------------------------------------------------------------------
-# Parsing degli argomenti (tutto cio' che segue "--" nella riga di comando)
+# Parsing argomenti (tutto cio' che segue "--" nella riga di comando)
 # ---------------------------------------------------------------------------
 
 def parse_args():
     argv = sys.argv
     argv = argv[argv.index("--") + 1:] if "--" in argv else []
 
-    parser = argparse.ArgumentParser(description="Render OBJ in Blender headless")
-    parser.add_argument("--obj", required=True, help="Percorso del file .obj")
-    parser.add_argument("--out", required=True, help="Cartella di output dei render")
-    parser.add_argument("--images", default="", help="Cartella delle foto originali")
-    parser.add_argument("--log", default="", help="File di log di fotogrammetria")
-    parser.add_argument("--cameras", type=int, default=8, help="N. camere se simulate")
-    parser.add_argument("--resx", type=int, default=1920)
-    parser.add_argument("--resy", type=int, default=1080)
-    parser.add_argument("--engine", default="BLENDER_EEVEE")
-    parser.add_argument("--format", default="PNG")
-    return parser.parse_args(argv)
+    p = argparse.ArgumentParser(description="Render OBJ in Blender headless")
+    p.add_argument("--obj", required=True, help="Percorso del file .obj")
+    p.add_argument("--out", required=True, help="Cartella di output dei render")
+    p.add_argument("--sfm", default="", help="File pose fotogrammetria (AliceVision .sfm/.json, COLMAP images.txt, o CSV)")
+    p.add_argument("--images", default="", help="Cartella delle foto originali (per fallback e campione sfondo)")
+    p.add_argument("--cameras", type=int, default=8, help="N. camere se simulate")
+    p.add_argument("--resx", type=int, default=1920, help="Risoluzione X di default (fallback)")
+    p.add_argument("--resy", type=int, default=1080, help="Risoluzione Y di default (fallback)")
+    p.add_argument("--engine", default="BLENDER_EEVEE")
+    p.add_argument("--format", default="PNG")
+    p.add_argument("--no-bg-sample", action="store_true", help="Non campionare il colore di sfondo dalle foto")
+    return p.parse_args(argv)
 
 
 # ---------------------------------------------------------------------------
-# Pulizia della scena
+# Pulizia scena
 # ---------------------------------------------------------------------------
 
 def reset_scene():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete()
-    # Rimuovi eventuali dati orfani
-    for block in (bpy.data.meshes, bpy.data.materials, bpy.data.cameras, bpy.data.lights):
+    for block in (bpy.data.meshes, bpy.data.materials, bpy.data.cameras, bpy.data.lights, bpy.data.images):
         for item in list(block):
             if item.users == 0:
                 block.remove(item)
 
 
 # ---------------------------------------------------------------------------
-# Import dell'OBJ (compatibile 3.x / 4.x)
+# Import OBJ (compatibile 3.x / 4.x)
 # ---------------------------------------------------------------------------
 
 def import_obj(path):
@@ -94,10 +97,6 @@ def import_obj(path):
     return meshes
 
 
-# ---------------------------------------------------------------------------
-# Bounding box / centro / raggio dell'insieme di mesh
-# ---------------------------------------------------------------------------
-
 def scene_bounds(meshes):
     coords = []
     for obj in meshes:
@@ -110,141 +109,240 @@ def scene_bounds(meshes):
                                (min(ys) + max(ys)) / 2,
                                (min(zs) + max(zs)) / 2))
     radius = max((max(xs) - min(xs)), (max(ys) - min(ys)), (max(zs) - min(zs))) / 2
-    radius = max(radius, 1e-3)
-    return center, radius
+    return center, max(radius, 1e-3)
 
 
 # ---------------------------------------------------------------------------
-# Estrazione delle coordinate camera dal log di fotogrammetria
+# Camera spec = dizionario che descrive una telecamera da creare
+#   { name, location(Vector),
+#     matrix(Matrix4 camera-to-world) OPPURE target(Vector),
+#     lens(mm|None), sensor_width(mm|None), resx(int|None), resy(int|None) }
 # ---------------------------------------------------------------------------
 
-def find_log(images_dir, explicit_log):
-    """Restituisce il percorso di un log di fotogrammetria, se disponibile."""
-    if explicit_log and os.path.isfile(explicit_log):
-        return explicit_log
-    if images_dir and os.path.isdir(images_dir):
-        # Nomi tipici prodotti da Meshroom / COLMAP.
-        for pattern in ("cameras.sfm", "*.sfm", "cameras.json", "images.txt"):
-            hits = sorted(glob.glob(os.path.join(images_dir, "**", pattern), recursive=True))
-            if hits:
-                return hits[0]
-    return ""
-
-
-def load_camera_positions(log_path):
-    """Legge le posizioni (x, y, z) delle camere dal log.
-
-    Supporta formati semplici:
-      - Meshroom .sfm / .json  -> chiave "poses" con "center" del trasformo.
-      - COLMAP images.txt      -> righe con quaternione + traslazione.
-      - CSV/TXT generico       -> righe "x,y,z" (una per camera).
-    Restituisce una lista di mathutils.Vector, oppure [] se non interpretabile.
-    """
-    positions = []
-    ext = os.path.splitext(log_path)[1].lower()
+def _to_float(v, default=0.0):
     try:
-        if ext in (".sfm", ".json"):
-            with open(log_path, "r", encoding="utf-8") as f:
+        if isinstance(v, (list, tuple)):
+            v = v[0]
+        return float(v)
+    except (TypeError, ValueError, IndexError):
+        return default
+
+
+def load_alicevision_sfm(data):
+    """Estrae le camere da un dizionario SfM in formato AliceVision (Meshroom).
+
+    Ogni vista collegata a una posa produce una spec con posa reale (matrice
+    camera-to-world in convenzione Blender) e intrinseci (focale/sensore/risol.).
+    """
+    intr = {}
+    for it in data.get("intrinsics", []):
+        key = it.get("intrinsicId")
+        if key is not None:
+            intr[str(key)] = it
+
+    poses = {}
+    for pz in data.get("poses", []):
+        key = pz.get("poseId")
+        tr = pz.get("pose", {}).get("transform")
+        if key is not None and tr:
+            poses[str(key)] = tr
+
+    # Conversione dagli assi camera AliceVision (X destra, Y giu', Z avanti)
+    # agli assi camera Blender (X destra, Y su', Z indietro): diag(1,-1,-1).
+    conv = mathutils.Matrix(((1, 0, 0), (0, -1, 0), (0, 0, -1)))
+
+    specs = []
+    for v in data.get("views", []):
+        pid = str(v.get("poseId"))
+        if pid not in poses:
+            continue
+        tr = poses[pid]
+        rot = tr.get("rotation")
+        cen = tr.get("center")
+        if not rot or not cen or len(rot) < 9 or len(cen) < 3:
+            continue
+
+        r = [ _to_float(x) for x in rot ]          # row-major, world->camera (R)
+        R = mathutils.Matrix(((r[0], r[1], r[2]),
+                              (r[3], r[4], r[5]),
+                              (r[6], r[7], r[8])))
+        C = mathutils.Vector([_to_float(cen[i]) for i in range(3)])
+        R_c2w = R.transposed()                     # camera->world
+        R_blender = R_c2w @ conv                   # assi Blender
+        M = mathutils.Matrix.Translation(C) @ R_blender.to_4x4()
+
+        it = intr.get(str(v.get("intrinsicId")), {})
+        width = int(_to_float(v.get("width") or it.get("width") or 1920, 1920))
+        height = int(_to_float(v.get("height") or it.get("height") or 1080, 1080))
+        sensor_w = _to_float(it.get("sensorWidth"), 36.0) or 36.0
+
+        # Focale in mm: preferisci 'focalLength' (mm); altrimenti da pixel.
+        lens = _to_float(it.get("focalLength"), 0.0)
+        if lens <= 0:
+            pxf = it.get("pxFocalLength") or it.get("pxInitialFocalLength")
+            pxf = _to_float(pxf, 0.0)
+            if pxf > 0 and width > 0:
+                lens = pxf / width * sensor_w
+        if lens <= 0:
+            lens = 50.0
+
+        name = os.path.basename(str(v.get("path", ""))) or None
+        specs.append({
+            "name": name,
+            "location": C,
+            "matrix": M,
+            "lens": lens,
+            "sensor_width": sensor_w,
+            "resx": width,
+            "resy": height,
+        })
+    if specs:
+        print(f"[SFM] Ricostruite {len(specs)} camere da AliceVision.")
+    return specs
+
+
+def load_colmap_images_txt(path):
+    """COLMAP images.txt -> specs (solo posa; intrinseci non letti qui)."""
+    specs = []
+    with open(path, "r", encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
+    conv = mathutils.Matrix(((1, 0, 0), (0, -1, 0), (0, 0, -1)))
+    for ln in lines[::2]:  # righe dispari = camere
+        parts = ln.split()
+        if len(parts) < 10:
+            continue
+        qw, qx, qy, qz = map(float, parts[1:5])
+        tx, ty, tz = map(float, parts[5:8])
+        name = parts[9]
+        q = mathutils.Quaternion((qw, qx, qy, qz))
+        R = q.to_matrix()                 # world->camera
+        t = mathutils.Vector((tx, ty, tz))
+        C = -(R.transposed() @ t)
+        R_blender = R.transposed() @ conv
+        M = mathutils.Matrix.Translation(C) @ R_blender.to_4x4()
+        specs.append({"name": os.path.basename(name), "location": C, "matrix": M,
+                      "lens": None, "sensor_width": None, "resx": None, "resy": None})
+    if specs:
+        print(f"[SFM] Ricostruite {len(specs)} camere da COLMAP images.txt.")
+    return specs
+
+
+def load_csv_positions(path):
+    """CSV/TXT 'x,y,z' -> specs con sola posizione (guardano il centro)."""
+    specs = []
+    with open(path, "r", encoding="utf-8") as f:
+        for ln in f:
+            ln = ln.strip()
+            if not ln or ln.startswith("#"):
+                continue
+            sep = "," if "," in ln else None
+            parts = ln.split(sep)
+            if len(parts) >= 3:
+                try:
+                    loc = mathutils.Vector([float(parts[i]) for i in range(3)])
+                except ValueError:
+                    continue
+                specs.append({"name": None, "location": loc, "target": True,
+                              "lens": None, "sensor_width": None, "resx": None, "resy": None})
+    if specs:
+        print(f"[SFM] Lette {len(specs)} posizioni camera da CSV.")
+    return specs
+
+
+def load_camera_specs(sfm_path):
+    """Dispatch in base al contenuto/estensione del file pose."""
+    if not sfm_path or not os.path.isfile(sfm_path):
+        return []
+    base = os.path.basename(sfm_path).lower()
+    ext = os.path.splitext(base)[1]
+    try:
+        if ext in (".sfm", ".json", ".abc.json"):
+            with open(sfm_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            for pose in data.get("poses", []):
-                tr = pose.get("pose", {}).get("transform", {})
-                center = tr.get("center")
-                if center and len(center) == 3:
-                    positions.append(mathutils.Vector([float(v) for v in center]))
-        elif os.path.basename(log_path).lower() == "images.txt":
-            # COLMAP: righe dispari = camere. Formato:
-            # IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME
-            with open(log_path, "r", encoding="utf-8") as f:
-                lines = [ln.strip() for ln in f if ln.strip() and not ln.startswith("#")]
-            for ln in lines[::2]:
-                parts = ln.split()
-                if len(parts) >= 8:
-                    qw, qx, qy, qz = map(float, parts[1:5])
-                    tx, ty, tz = map(float, parts[5:8])
-                    # Centro camera C = -R^T * t
-                    q = mathutils.Quaternion((qw, qx, qy, qz))
-                    R = q.to_matrix()
-                    t = mathutils.Vector((tx, ty, tz))
-                    positions.append(-(R.transposed() @ t))
-        else:
-            # CSV/TXT generico "x,y,z"
-            with open(log_path, "r", encoding="utf-8") as f:
-                for ln in f:
-                    ln = ln.strip()
-                    if not ln or ln.startswith("#"):
-                        continue
-                    sep = "," if "," in ln else None
-                    parts = ln.split(sep)
-                    if len(parts) >= 3:
-                        try:
-                            positions.append(mathutils.Vector([float(parts[i]) for i in range(3)]))
-                        except ValueError:
-                            continue
+            specs = load_alicevision_sfm(data)
+            if specs:
+                return specs
+        if base == "images.txt":
+            return load_colmap_images_txt(sfm_path)
+        # tentativo JSON generico
+        if ext in (".sfm", ".json"):
+            return []
+        return load_csv_positions(sfm_path)
     except Exception as exc:
-        print(f"[LOG] Impossibile interpretare il log ({exc}); si passa alla simulazione.")
+        print(f"[SFM] Impossibile interpretare '{sfm_path}': {exc}")
         return []
 
-    if positions:
-        print(f"[LOG] Estratte {len(positions)} posizioni camera da {os.path.basename(log_path)}.")
-    return positions
 
-
-def simulate_positions(center, radius, count):
-    """Dispone ``count`` camere su un anello inclinato attorno all'oggetto."""
-    positions = []
-    dist = radius * 3.0
-    for i in range(count):
-        angle = 2 * math.pi * i / max(count, 1)
-        x = center.x + dist * math.cos(angle)
-        y = center.y + dist * math.sin(angle)
-        z = center.z + radius * 1.2  # leggermente dall'alto
-        positions.append(mathutils.Vector((x, y, z)))
-    print(f"[SIM] Simulate {len(positions)} posizioni camera su un anello.")
-    return positions
-
+# ---------------------------------------------------------------------------
+# Simulazione (fallback)
+# ---------------------------------------------------------------------------
 
 def count_images(images_dir):
     if not images_dir or not os.path.isdir(images_dir):
-        return 0
+        return []
     exts = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.tif", "*.tiff")
-    total = 0
+    hits = []
     for e in exts:
-        total += len(glob.glob(os.path.join(images_dir, e)))
-        total += len(glob.glob(os.path.join(images_dir, e.upper())))
-    return total
+        hits += glob.glob(os.path.join(images_dir, e))
+        hits += glob.glob(os.path.join(images_dir, e.upper()))
+    return sorted(set(hits))
+
+
+def simulate_specs(center, radius, count, names=None):
+    specs = []
+    dist = radius * 3.0
+    for i in range(count):
+        angle = 2 * math.pi * i / max(count, 1)
+        loc = mathutils.Vector((center.x + dist * math.cos(angle),
+                                center.y + dist * math.sin(angle),
+                                center.z + radius * 1.2))
+        name = os.path.basename(names[i]) if names and i < len(names) else None
+        specs.append({"name": name, "location": loc, "target": True,
+                      "lens": None, "sensor_width": None, "resx": None, "resy": None})
+    print(f"[SIM] Simulate {len(specs)} camere su un anello.")
+    return specs
 
 
 # ---------------------------------------------------------------------------
-# Creazione telecamere che puntano al centro dell'oggetto
+# Creazione telecamere
 # ---------------------------------------------------------------------------
 
-def create_cameras(positions, target):
+def create_cameras(specs, target, default_resx, default_resy):
     cams = []
-    for i, pos in enumerate(positions):
+    for i, spec in enumerate(specs):
         cam_data = bpy.data.cameras.new(name=f"Cam_{i:03d}")
+        if spec.get("lens"):
+            cam_data.sensor_fit = "HORIZONTAL"
+            cam_data.sensor_width = spec.get("sensor_width") or 36.0
+            cam_data.lens = spec["lens"]
         cam_obj = bpy.data.objects.new(name=f"Cam_{i:03d}", object_data=cam_data)
         bpy.context.scene.collection.objects.link(cam_obj)
-        cam_obj.location = pos
-        # Orienta la camera verso il target: -Z guarda il soggetto, +Y in alto.
-        direction = (target - pos)
-        cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
-        cams.append(cam_obj)
+
+        if spec.get("matrix") is not None:
+            cam_obj.matrix_world = spec["matrix"]
+        else:
+            cam_obj.location = spec["location"]
+            direction = target - spec["location"]
+            cam_obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
+        spec["_resx"] = spec.get("resx") or default_resx
+        spec["_resy"] = spec.get("resy") or default_resy
+        spec["_cam"] = cam_obj
+        cams.append(spec)
     print(f"[CAM] Create {len(cams)} telecamere.")
     return cams
 
 
 # ---------------------------------------------------------------------------
-# Materiale standard + luce fissa
+# Materiale standard + luce fissa + sfondo campionato
 # ---------------------------------------------------------------------------
 
 def apply_standard_material(meshes):
-    """Applica un Principled BSDF neutro a tutte le mesh (stile uniforme)."""
     mat = bpy.data.materials.new(name="StandardMat")
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     if bsdf:
         bsdf.inputs["Base Color"].default_value = (0.8, 0.8, 0.8, 1.0)
-        # "Roughness" esiste in tutte le versioni; "Specular" cambia nome in 4.x.
         if "Roughness" in bsdf.inputs:
             bsdf.inputs["Roughness"].default_value = 0.5
         for spec_name in ("Specular IOR Level", "Specular"):
@@ -258,11 +356,10 @@ def apply_standard_material(meshes):
 
 
 def add_fixed_light(center, radius):
-    """Aggiunge una luce Sun fissa per ombre e stile ripetibili."""
     light_data = bpy.data.lights.new(name="KeyLight", type="SUN")
     light_data.energy = 3.0
     if hasattr(light_data, "angle"):
-        light_data.angle = math.radians(2.0)  # ombre leggermente morbide
+        light_data.angle = math.radians(2.0)
     light_obj = bpy.data.objects.new(name="KeyLight", object_data=light_data)
     bpy.context.scene.collection.objects.link(light_obj)
     light_obj.location = center + mathutils.Vector((radius * 2, -radius * 2, radius * 3))
@@ -270,62 +367,98 @@ def add_fixed_light(center, radius):
     print("[LIGHT] Luce fissa (Sun) aggiunta.")
 
 
-# ---------------------------------------------------------------------------
-# Impostazioni di render
-# ---------------------------------------------------------------------------
+def sample_background_color(images_dir):
+    """Colore medio (robusto) campionato dai bordi di una foto sorgente.
 
-def configure_render(args):
-    scene = bpy.context.scene
-
-    # Engine: se il nome richiesto non esiste in questa versione, usa un fallback.
-    engine = args.engine
+    I bordi di uno scatto su fondo uniforme approssimano il colore di sfondo.
+    Best-effort: qualsiasi errore -> None (si usa lo sfondo di default).
+    """
+    paths = count_images(images_dir)
+    if not paths:
+        return None
     try:
-        scene.render.engine = engine
-    except TypeError:
-        # Blender 4.2+ ha rinominato EEVEE in BLENDER_EEVEE_NEXT.
-        for fallback in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"):
-            try:
-                scene.render.engine = fallback
-                engine = fallback
-                break
-            except TypeError:
-                continue
-    print(f"[RENDER] Engine: {engine}")
+        img = bpy.data.images.load(paths[0], check_existing=True)
+        w, h = img.size
+        if w == 0 or h == 0 or w * h > 6_000_000:
+            return None
+        px = list(img.pixels)  # RGBA float [0..1], una sola copia
+        ch = img.channels or 4
 
-    scene.render.resolution_x = args.resx
-    scene.render.resolution_y = args.resy
-    scene.render.resolution_percentage = 100
-    scene.render.image_settings.file_format = args.format
+        def pixel(x, y):
+            idx = (y * w + x) * ch
+            return px[idx], px[idx + 1], px[idx + 2]
 
-    # Sfondo neutro
+        samples = []
+        margin_x = max(1, w // 20)
+        margin_y = max(1, h // 20)
+        for (x, y) in ((margin_x, margin_y), (w - margin_x - 1, margin_y),
+                       (margin_x, h - margin_y - 1), (w - margin_x - 1, h - margin_y - 1)):
+            samples.append(pixel(x, y))
+        r = sum(s[0] for s in samples) / len(samples)
+        g = sum(s[1] for s in samples) / len(samples)
+        b = sum(s[2] for s in samples) / len(samples)
+        print(f"[BG] Colore di sfondo campionato: ({r:.3f}, {g:.3f}, {b:.3f})")
+        return (r, g, b, 1.0)
+    except Exception as exc:
+        print(f"[BG] Campionamento sfondo non riuscito ({exc}).")
+        return None
+
+
+def configure_world(bg_color):
+    scene = bpy.context.scene
     world = scene.world or bpy.data.worlds.new("World")
     scene.world = world
     world.use_nodes = True
     bg = world.node_tree.nodes.get("Background")
     if bg:
-        bg.inputs["Color"].default_value = (0.05, 0.05, 0.05, 1.0)
+        bg.inputs["Color"].default_value = bg_color or (0.05, 0.05, 0.05, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Render
+# ---------------------------------------------------------------------------
+
+def configure_render(args):
+    scene = bpy.context.scene
+    engine = args.engine
+    try:
+        scene.render.engine = engine
+    except TypeError:
+        for fb in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE", "CYCLES", "BLENDER_WORKBENCH"):
+            try:
+                scene.render.engine = fb
+                engine = fb
+                break
+            except TypeError:
+                continue
+    print(f"[RENDER] Engine: {engine}")
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = args.format
 
 
 def ext_for_format(fmt):
-    return {
-        "PNG": "png",
-        "JPEG": "jpg",
-        "OPEN_EXR": "exr",
-        "TIFF": "tif",
-    }.get(fmt, "png")
+    return {"PNG": "png", "JPEG": "jpg", "OPEN_EXR": "exr", "TIFF": "tif"}.get(fmt, "png")
 
 
-def render_all(cameras, out_dir, fmt):
+def render_all(cams, out_dir, fmt):
     scene = bpy.context.scene
     os.makedirs(out_dir, exist_ok=True)
     ext = ext_for_format(fmt)
-    for i, cam in enumerate(cameras):
-        scene.camera = cam
-        filepath = os.path.join(out_dir, f"frame_{i:04d}.{ext}")
+    for i, spec in enumerate(cams):
+        scene.camera = spec["_cam"]
+        scene.render.resolution_x = spec["_resx"]
+        scene.render.resolution_y = spec["_resy"]
+
+        if spec.get("name"):
+            stem = os.path.splitext(spec["name"])[0]
+            fname = f"{stem}.{ext}"
+        else:
+            fname = f"frame_{i:04d}.{ext}"
+        filepath = os.path.join(out_dir, fname)
         scene.render.filepath = filepath
-        print(f"[RENDER] ({i + 1}/{len(cameras)}) -> {filepath}")
+        print(f"[RENDER] ({i + 1}/{len(cams)}) {spec['_resx']}x{spec['_resy']} -> {filepath}")
         bpy.ops.render.render(write_still=True)
-    print(f"[DONE] {len(cameras)} frame renderizzati in {out_dir}")
+    print(f"[DONE] {len(cams)} frame renderizzati in {out_dir}")
 
 
 # ---------------------------------------------------------------------------
@@ -343,27 +476,26 @@ def main():
     center, radius = scene_bounds(meshes)
     print(f"[SCENE] Centro={tuple(round(v, 3) for v in center)} Raggio={radius:.3f}")
 
-    # 2) Telecamere: prima prova dal log, poi simula.
-    log_path = find_log(args.images, args.log)
-    positions = load_camera_positions(log_path) if log_path else []
-    if not positions:
-        n = args.cameras
-        img_count = count_images(args.images)
-        if img_count:
-            n = min(max(img_count, 1), 72)  # una camera per foto, con un tetto
-            print(f"[SIM] Trovate {img_count} foto: uso {n} telecamere simulate.")
-        positions = simulate_positions(center, radius, n)
+    # Camere: prima dal file SfM, poi simulazione.
+    specs = load_camera_specs(args.sfm)
+    if not specs:
+        img_paths = count_images(args.images)
+        n = len(img_paths) if img_paths else args.cameras
+        n = min(max(n, 1), 200)
+        if img_paths:
+            print(f"[SIM] Nessun SfM valido: {len(img_paths)} foto -> {n} camere simulate.")
+        specs = simulate_specs(center, radius, n, names=img_paths or None)
 
-    cameras = create_cameras(positions, center)
+    cams = create_cameras(specs, center, args.resx, args.resy)
 
-    # 3) Materiale + luce
     apply_standard_material(meshes)
     add_fixed_light(center, radius)
 
-    # 4) Render
-    configure_render(args)
-    render_all(cameras, args.out, args.format)
+    bg = None if args.no_bg_sample else sample_background_color(args.images)
+    configure_world(bg)
 
+    configure_render(args)
+    render_all(cams, args.out, args.format)
     print("Blender headless render - completato")
 
 

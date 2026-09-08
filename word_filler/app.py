@@ -56,8 +56,10 @@ class WordFillerApp:
         self.fields: list[str] = []
         # {guide_path: {field: value}}
         self.extracted: dict[str, dict[str, str]] = {}
-        # {guide_path: {field: Entry widget}} for the review area
+        # {guide_path: {field: Entry widget}} for the review area — only ever
+        # holds the currently displayed guide (older widgets get destroyed).
         self._review_entries: dict[str, dict[str, tk.Entry]] = {}
+        self._current_review_path: str | None = None
 
         self._msg_queue: "queue.Queue[tuple]" = queue.Queue()
         self._busy = False
@@ -515,6 +517,10 @@ class WordFillerApp:
         if not path:
             return
 
+        # Save edits of the currently shown guide before switching, otherwise
+        # its Entry widgets are destroyed below and their values are lost.
+        self._save_current_review()
+
         for child in self.review_inner.winfo_children():
             child.destroy()
 
@@ -536,14 +542,33 @@ class WordFillerApp:
             entry._var = var  # keep a reference
             entries[field_name] = entry
         self.review_inner.columnconfigure(1, weight=1)
-        self._review_entries[path] = entries
+        # Only the currently shown guide keeps live Entry widgets.
+        self._review_entries = {path: entries}
+        self._current_review_path = path
+
+    def _save_current_review(self):
+        """Copy the currently shown guide's entry values into ``self.extracted``.
+
+        Reads only widgets that still exist, so a destroyed/rebuilt view can
+        never raise when we read back the values.
+        """
+        path = getattr(self, "_current_review_path", None)
+        if not path:
+            return
+        entries = self._review_entries.get(path)
+        if not entries:
+            return
+        store = self.extracted.setdefault(path, {})
+        for field_name, entry in entries.items():
+            try:
+                if entry.winfo_exists():
+                    store[field_name] = entry.get()
+            except tk.TclError:
+                continue
 
     def _sync_review_entries(self):
-        """Copy current entry values back into ``self.extracted``."""
-        for path, entries in self._review_entries.items():
-            store = self.extracted.setdefault(path, {})
-            for field_name, entry in entries.items():
-                store[field_name] = entry.get()
+        """Persist the visible guide's edits back into ``self.extracted``."""
+        self._save_current_review()
 
     # -------------------------------------------------------- generation
     def _start_generation(self):
@@ -564,15 +589,18 @@ class WordFillerApp:
         def work():
             ok, fail = 0, 0
             last_dir = None
-            for gp, values in data_snapshot.items():
-                try:
-                    out = pipeline.generate_output(template_path, values, gp, cfg)
-                    last_dir = str(out.parent)
-                    ok += 1
-                    self._msg_queue.put(("log", f"  ✔ {out.name}"))
-                except Exception as exc:
-                    fail += 1
-                    self._msg_queue.put(("log", f"  ✘ {Path(gp).name}: {exc}"))
+            try:
+                for gp, values in data_snapshot.items():
+                    try:
+                        out = pipeline.generate_output(template_path, values, gp, cfg)
+                        last_dir = str(out.parent)
+                        ok += 1
+                        self._msg_queue.put(("log", f"  ✔ {out.name}"))
+                    except Exception as exc:
+                        fail += 1
+                        self._msg_queue.put(("log", f"  ✘ {Path(gp).name}: {exc}"))
+            except Exception as exc:  # never leave the button stuck disabled
+                self._msg_queue.put(("log", f"  ✘ Errore imprevisto: {exc}"))
             self._msg_queue.put(("generation_done", ok, fail, last_dir))
 
         threading.Thread(target=work, daemon=True).start()

@@ -17,6 +17,7 @@ DEFAULTS = {
     "use_ai": True,
     "first_page_only": True,
     "resolve_judges": True,
+    "flatten_pdf": False,
     "output_dir": "",
     "output_suffix": "_compilato",
 }

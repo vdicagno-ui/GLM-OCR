@@ -270,6 +270,51 @@ def test_guide_reading():
     print("test_guide_reading OK")
 
 
+def test_pdf_form_fill():
+    """Fill a fillable PDF form, keeping it editable. Skips without reportlab."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from pypdf import PdfReader
+    except Exception:
+        print("test_pdf_form_fill SKIP (reportlab/pypdf non disponibili)")
+        return
+
+    with tempfile.TemporaryDirectory() as d:
+        tpl = os.path.join(d, "modulo.pdf")
+        c = canvas.Canvas(tpl, pagesize=A4)
+        c.setFont("Helvetica", 12)
+        c.drawString(72, 760, "Nome e cognome:")
+        c.drawString(72, 680, "Giudice:")
+        f = c.acroForm
+        f.textfield(name="nome e cognome", x=200, y=755, width=250, height=18,
+                    borderStyle="inset", value="")
+        # Field identified by the placeholder text held in its value.
+        f.textfield(name="campo3", x=200, y=675, width=300, height=18,
+                    borderStyle="inset", value="[da compilare giudice delegato]")
+        c.save()
+
+        cfg = {
+            "use_ai": False, "use_custom_regex": False,
+            "preset": template.DEFAULT_PRESET, "output_dir": "",
+            "output_suffix": "_compilato", "flatten_pdf": False,
+        }
+        fields = pipeline.scan_template_fields(tpl, cfg)
+        assert set(fields) == {"nome e cognome", "giudice delegato"}, fields
+
+        values = {"nome e cognome": "Mario Rossi",
+                  "giudice delegato": "dott.ssa Maria Rosaria OOOO"}
+        out = pipeline.generate_output(tpl, values, os.path.join(d, "guida.pdf"), cfg)
+        assert str(out).endswith(".pdf"), out
+
+        flds = PdfReader(str(out)).get_fields()
+        # Still editable (fields present) and filled with the right values.
+        assert flds is not None and len(flds) == 2, flds
+        got = {fo.get("/V") for fo in flds.values()}
+        assert "Mario Rossi" in got and "dott.ssa Maria Rosaria OOOO" in got, got
+    print("test_pdf_form_fill OK")
+
+
 if __name__ == "__main__":
     test_scan_and_fill()
     test_run_split_placeholder()
@@ -286,4 +331,5 @@ if __name__ == "__main__":
     test_first_page_only_docx_pagebreak()
     test_first_page_only_char_cap()
     test_guide_reading()
+    test_pdf_form_fill()
     print("\nTutti i test superati.")

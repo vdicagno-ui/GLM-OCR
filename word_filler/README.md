@@ -100,6 +100,22 @@ dist\CompilatoreTemplateWord.exe
   tabulazione o fine riga**, quindi è meno affidabile per il testo inline.
 - L'app cerca i segnaposto anche dentro **tabelle, intestazioni e piè di pagina**.
 
+## Template PDF (moduli compilabili)
+
+Oltre al Word (.docx), puoi usare come template un **modulo PDF compilabile**
+(AcroForm: quello con le caselle in cui si clicca e si scrive). In quel caso:
+
+- ogni **campo del modulo** è un segnaposto. Può essere identificato in due modi:
+  1. dal **testo `[da compilare …]`** scritto come valore del campo, oppure
+  2. dal **nome del campo** stesso (es. un campo chiamato `giudice delegato`);
+- l'**output è un PDF** con lo stesso modulo, **ancora editabile**, con i valori
+  già inseriti (puoi ritoccarli a mano dopo);
+- il nome file segue il file guida, con estensione `.pdf`.
+
+Il formato **Word resta pienamente disponibile**: se il template è `.docx`
+l'output è `.docx`, se è `.pdf` l'output è `.pdf`. Il riconoscimento dei giudici
+e la lettura della prima pagina del file guida funzionano in entrambi i casi.
+
 ## Riconoscimento automatico dei giudici (delegato / delegante)
 
 In molti atti i giudici **non hanno un'etichetta** e compaiono solo come

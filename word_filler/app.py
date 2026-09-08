@@ -161,7 +161,7 @@ class WordFillerApp:
 
     def _build_setup_tab(self, parent):
         # --- Template ------------------------------------------------------
-        tpl = ttk.LabelFrame(parent, text="Template Word (.docx)", padding=8)
+        tpl = ttk.LabelFrame(parent, text="Template Word (.docx) o modulo PDF (.pdf)", padding=8)
         tpl.pack(fill="x")
         self.template_var = tk.StringVar()
         ttk.Entry(tpl, textvariable=self.template_var).pack(
@@ -329,8 +329,13 @@ class WordFillerApp:
     # ------------------------------------------------------------ file pickers
     def _choose_template(self):
         path = filedialog.askopenfilename(
-            title="Seleziona il template Word",
-            filetypes=[("Documenti Word", "*.docx"), ("Tutti i file", "*.*")],
+            title="Seleziona il template (Word o modulo PDF)",
+            filetypes=[
+                ("Template Word o modulo PDF", "*.docx *.pdf"),
+                ("Documenti Word", "*.docx"),
+                ("Moduli PDF", "*.pdf"),
+                ("Tutti i file", "*.*"),
+            ],
         )
         if path:
             self.template_path = path

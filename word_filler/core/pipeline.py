@@ -72,12 +72,14 @@ def extract_for_guide(
     return result
 
 
-def build_output_path(guide_path: str, cfg: dict) -> Path:
+def build_output_path(guide_path: str, cfg: dict, template_path: str = "") -> Path:
     guide = Path(guide_path)
     suffix = cfg.get("output_suffix") or "_compilato"
     out_dir = cfg.get("output_dir", "").strip()
     base_dir = Path(out_dir) if out_dir else guide.parent
-    return base_dir / f"{guide.stem}{suffix}.docx"
+    # Output format follows the template: PDF form -> .pdf, otherwise .docx.
+    ext = ".pdf" if template.is_pdf(template_path) else ".docx"
+    return base_dir / f"{guide.stem}{suffix}{ext}"
 
 
 def generate_output(
@@ -87,11 +89,12 @@ def generate_output(
     cfg: dict,
 ) -> Path:
     """Fill the template with ``values`` and write the output document."""
-    out_path = build_output_path(guide_path, cfg)
+    out_path = build_output_path(guide_path, cfg, template_path)
     template.fill_template(
         template_path=template_path,
         values=values,
         output_path=out_path,
         preset_or_regex=resolve_pattern(cfg),
+        flatten=bool(cfg.get("flatten_pdf", False)),
     )
     return out_path

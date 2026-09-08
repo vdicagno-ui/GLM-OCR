@@ -78,8 +78,19 @@ def _norm_key(text: str) -> str:
 # Scanning
 # ---------------------------------------------------------------------------
 
+def is_pdf(path: str | Path) -> bool:
+    return str(path).lower().endswith(".pdf")
+
+
 def scan_placeholders(template_path: str | Path, preset_or_regex: str) -> list[str]:
-    """Return the ordered list of unique field descriptions in the template."""
+    """Return the ordered list of unique field descriptions in the template.
+
+    Supports Word (.docx) templates and fillable PDF forms (.pdf).
+    """
+    if is_pdf(template_path):
+        from . import pdf_template
+        return pdf_template.scan_pdf_fields(template_path, preset_or_regex)
+
     from docx import Document
 
     pattern = get_pattern(preset_or_regex)
@@ -130,12 +141,20 @@ def fill_template(
     values: dict[str, str],
     output_path: str | Path,
     preset_or_regex: str,
+    flatten: bool = False,
 ) -> dict[str, int]:
     """Fill ``template_path`` with ``values`` and save to ``output_path``.
 
     ``values`` maps normalised field descriptions to their replacement text.
-    Returns a dict {field: replacement_count} for reporting.
+    Returns a dict {field: replacement_count} for reporting. Handles both Word
+    (.docx) templates and fillable PDF forms (.pdf).
     """
+    if is_pdf(template_path):
+        from . import pdf_template
+        return pdf_template.fill_pdf_form(
+            template_path, values, output_path, preset_or_regex, flatten=flatten
+        )
+
     from docx import Document
 
     pattern = get_pattern(preset_or_regex)

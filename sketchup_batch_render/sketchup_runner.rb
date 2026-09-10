@@ -70,6 +70,47 @@ module SkpBatchRender
     UNIT_TO_INCH[units.to_s.strip.downcase] || 1.0
   end
 
+  # Deduce automaticamente il fattore di scala confrontando la dimensione reale
+  # del modello (diagonale del bounding box, in pollici) con la distanza
+  # camera-target letta dal JSON. Sceglie l'unita' che inquadra il modello.
+  def self.detect_unit_factor(positions, model)
+    bb = model.bounds
+    return 1.0 if bb.nil? || bb.empty?
+    s = bb.diagonal.to_f # dimensione modello in pollici
+    return 1.0 if s <= 0.0
+
+    positions.each do |pos|
+      cam = pos['camera']
+      next unless cam && cam['eye'] && cam['target']
+      e = cam['eye']; t = cam['target']
+      d = Math.sqrt((e[0].to_f - t[0].to_f)**2 +
+                    (e[1].to_f - t[1].to_f)**2 +
+                    (e[2].to_f - t[2].to_f)**2)
+      next if d <= 1e-9
+
+      target_ratio = 1.6 # distanza camera ~ 1.6x la dimensione (fov ~35 gradi)
+      candidates = {
+        'inch' => 1.0,
+        'mm'   => 1.0 / 25.4,
+        'cm'   => 1.0 / 2.54,
+        'm'    => 39.37007874015748,
+        'ft'   => 12.0
+      }
+      best_name = 'inch'; best_factor = 1.0; best_err = nil
+      candidates.each do |name, f|
+        ratio = (f * d) / s
+        next if ratio <= 0.0
+        err = (Math.log(ratio) - Math.log(target_ratio)).abs
+        if best_err.nil? || err < best_err
+          best_err = err; best_name = name; best_factor = f
+        end
+      end
+      log("Auto-unita': diagonale modello=#{s.round(2)} in, distanza camera raw=#{d.round(4)} -> unita'='#{best_name}' (fattore #{best_factor.round(6)})")
+      return best_factor
+    end
+    1.0
+  end
+
   def self.point(arr, f)
     Geom::Point3d.new(arr[0].to_f * f, arr[1].to_f * f, arr[2].to_f * f)
   end
@@ -83,9 +124,10 @@ module SkpBatchRender
   end
 
   # --- applica la camera ------------------------------------------------------
-  def self.apply_camera(view, cam, units)
+  # default_factor: fattore di scala gia' risolto (auto o unita' scelta).
+  def self.apply_camera(view, cam, default_factor)
     return if cam.nil?
-    f = unit_factor(cam['units'] || units)
+    f = cam['units'] ? unit_factor(cam['units']) : default_factor
 
     eye    = point(cam['eye'], f)
     target = point(cam['target'], f)
@@ -112,6 +154,9 @@ module SkpBatchRender
     end
 
     view.camera = camera
+    log("  camera eye=#{eye.to_a.map { |v| v.round(2) }} " \
+        "target=#{target.to_a.map { |v| v.round(2) }} " \
+        "fov=#{camera.perspective? ? camera.fov.round(1) : 'parallel'} (fattore #{f.round(6)})")
   end
 
   # --- applica luci e ombre ---------------------------------------------------
@@ -172,9 +217,9 @@ module SkpBatchRender
   end
 
   # --- render di una posizione -----------------------------------------------
-  def self.render_position(model, pos, index, outdir, width, height, units)
+  def self.render_position(model, pos, index, outdir, width, height, factor)
     view = model.active_view
-    apply_camera(view, pos['camera'], units)
+    apply_camera(view, pos['camera'], factor)
     apply_shadow(model.shadow_info, pos['shadows'] || pos['shadow'])
 
     view = model.active_view
@@ -221,14 +266,32 @@ module SkpBatchRender
     FileUtils.mkdir_p(outdir)
 
     log("Apro il modello: #{skp}")
-    Sketchup.open_file(skp)
+    ok = Sketchup.open_file(skp)
+    log("open_file ha restituito: #{ok.inspect}")
     model = Sketchup.active_model
     raise 'Nessun modello attivo dopo open_file' unless model
+
+    # diagnostica: dimensione reale del modello caricato
+    bb = model.bounds
+    if bb.nil? || bb.empty? || bb.diagonal.to_f <= 0.0
+      raise "Il modello sembra vuoto o non caricato (nessuna geometria visibile). " \
+            "Controlla il percorso del file .skp. File: #{skp}"
+    end
+    log("Modello caricato: diagonale=#{bb.diagonal.round(2)} in, " \
+        "min=#{bb.min.to_a.map { |v| v.round(2) }}, max=#{bb.max.to_a.map { |v| v.round(2) }}")
+
+    # risolve il fattore di scala delle coordinate camera
+    if units.nil? || units.to_s.strip.downcase == 'auto'
+      factor = detect_unit_factor(positions, model)
+    else
+      factor = unit_factor(units)
+      log("Unita' impostata manualmente: '#{units}' (fattore #{factor.round(6)})")
+    end
 
     outputs = []
     positions.each_with_index do |pos, i|
       log("Posizione #{i + 1}/#{positions.length}")
-      outputs << render_position(model, pos, i + 1, outdir, width, height, units)
+      outputs << render_position(model, pos, i + 1, outdir, width, height, factor)
     end
 
     write_status('done', "Renderizzate #{outputs.length} posizioni.", outputs)

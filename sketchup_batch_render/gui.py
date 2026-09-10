@@ -75,8 +75,18 @@ def sketchup_plugins_dir() -> str:
     return os.path.join(appdata, "SketchUp", "SketchUp 2017", "SketchUp", "Plugins")
 
 
+def app_dir() -> str:
+    """Cartella dell'eseguibile (se compilato) o dello script."""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def read_runner_source() -> str:
-    path = resource_path(RUNNER_BASENAME)
+    """Legge lo script Ruby. Se ne esiste una copia accanto all'eseguibile,
+    quella ha la precedenza (permette aggiornamenti senza ricompilare)."""
+    external = os.path.join(app_dir(), RUNNER_BASENAME)
+    path = external if os.path.isfile(external) else resource_path(RUNNER_BASENAME)
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
 
@@ -309,10 +319,10 @@ class App(tk.Tk):
         ttk.Label(row, text="x").pack(side="left", padx=4)
         ttk.Entry(row, textvariable=self.h_var, width=8).pack(side="left")
         ttk.Label(row, text="   Unita' coordinate:").pack(side="left", padx=(12, 4))
-        self.units_var = tk.StringVar(value="inch")
+        self.units_var = tk.StringVar(value="auto")
         ttk.Combobox(
             row, textvariable=self.units_var, width=8, state="readonly",
-            values=["inch", "mm", "cm", "m", "ft"],
+            values=["auto", "inch", "mm", "cm", "m", "ft"],
         ).pack(side="left")
 
         # Azione + stato

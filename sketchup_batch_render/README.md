@@ -127,11 +127,14 @@ dall'API), quindi puoi usare i tuoi file così come sono:
 | `height`      | numero      | altezza inquadratura (solo parallela, opz.) |
 | `units`       | testo       | unità di *questa* camera; sovrascrive quella globale (opz.) |
 
-> **Unità delle coordinate.** I valori `eye`/`target` esportati dall'API di
-> SketchUp sono in **pollici** (unità interna). Per questo nella GUI l'unità è
-> preimpostata su **`inch`**: così i tuoi file vengono riprodotti *esattamente*
-> come erano. Cambia l'unità (mm/cm/m/ft) solo se le coordinate dei tuoi file
-> sono espresse in un'altra unità.
+> **Unità delle coordinate (importante).** Le coordinate `eye`/`target`
+> devono essere nella stessa scala della geometria del modello, altrimenti la
+> camera "punta" fuori dall'oggetto e le foto mostrano solo lo sfondo.
+> Per questo la GUI è preimpostata su **`auto`**: il programma misura la
+> dimensione reale del modello aperto e sceglie da solo l'unità (mm/cm/m/inch/ft)
+> che inquadra correttamente l'oggetto. La scelta viene annotata nel log
+> (`%TEMP%\skp_batch_log.txt`). Se preferisci, puoi forzare manualmente
+> l'unità dal menu a tendina.
 
 ### shadows (luci e ombre) — chiavi native di SketchUp
 | Chiave                 | Tipo    | Descrizione |
@@ -183,8 +186,17 @@ python compose.py cartella\montage_3x3.bmp pos_01.bmp pos_02.bmp ... pos_09.bmp
   vedere il dettaglio. Verifica il percorso di `SketchUp.exe`.
 - **"Tempo scaduto"**: modelli molto pesanti possono superare i 15 minuti;
   il valore è modificabile in `gui.py` (`RENDER_TIMEOUT`).
-- **Coordinate sbagliate/foto "vuote"**: controlla l'**unità di misura**
-  selezionata e che `eye` e `target` non coincidano.
+- **Le foto mostrano solo lo sfondo (oggetto fuori campo)**: è quasi sempre
+  un problema di **scala/unità**. Lascia l'unità su **`auto`**; se ancora non
+  va, apri `%TEMP%\skp_batch_log.txt` e guarda la riga *"Auto-unità"* (mostra
+  la diagonale del modello e l'unità scelta) e le righe *"camera eye/target"*.
+  Se i valori camera sono molto più piccoli/grandi della diagonale del modello,
+  forza manualmente l'unità corretta (di solito `m` se le coordinate sono ~1).
+- **"Il modello sembra vuoto o non caricato"**: il file `.skp` non è stato
+  aperto (percorso errato) o non contiene geometria visibile. Verifica il file.
+- **Aggiornare lo script senza ricompilare l'exe**: metti una copia di
+  `sketchup_runner.rb` **nella stessa cartella** dell'eseguibile: la GUI usa
+  quella al posto di quella interna.
 - **SketchUp già aperto**: chiudilo prima di avviare, per evitare che il
   nuovo comando venga dirottato sulla finestra esistente.
 - Lo script Ruby viene (re)installato in

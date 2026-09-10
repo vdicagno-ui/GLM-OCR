@@ -309,10 +309,10 @@ class App(tk.Tk):
         ttk.Label(row, text="x").pack(side="left", padx=4)
         ttk.Entry(row, textvariable=self.h_var, width=8).pack(side="left")
         ttk.Label(row, text="   Unita' coordinate:").pack(side="left", padx=(12, 4))
-        self.units_var = tk.StringVar(value="mm")
+        self.units_var = tk.StringVar(value="inch")
         ttk.Combobox(
             row, textvariable=self.units_var, width=8, state="readonly",
-            values=["mm", "cm", "m", "inch", "ft"],
+            values=["inch", "mm", "cm", "m", "ft"],
         ).pack(side="left")
 
         # Azione + stato

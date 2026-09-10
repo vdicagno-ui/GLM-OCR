@@ -87,25 +87,30 @@ viene chiuso automaticamente. I risultati nella cartella di output:
 
 ## 4. Formato dei file JSON (una posizione per file)
 
-Ogni file descrive **una** posizione. Schema:
+Ogni file descrive **una** posizione. È supportato **direttamente il formato
+nativo di SketchUp** (quello che ottieni esportando `camera` e `shadow_info`
+dall'API), quindi puoi usare i tuoi file così come sono:
 
 ```json
 {
   "camera": {
-    "eye":    [5000, 0, 1600],
-    "target": [0, 0, 800],
-    "up":     [0, 0, 1],
+    "eye":    [0.6177856469, 0.9434952391, 1.0924834337],
+    "target": [-1.3631206782, 0.9761944310, 0.0949077388],
+    "up":     [-0.4496707065, 0.0074227986, 0.8931635672],
     "perspective": true,
-    "fov": 35
+    "fov": 35.0,
+    "image_width": 0.0
   },
-  "shadow": {
-    "display_shadows": true,
-    "light": 80,
-    "dark": 30,
-    "north_angle": 0,
-    "use_sun_for_shading": true,
-    "date": "2024-06-21",
-    "time_of_day": "14:00"
+  "shadows": {
+    "DisplayShadows": true,
+    "UseSunForAllShading": true,
+    "Light": 61,
+    "Dark": 13,
+    "TZOffset": -7.0,
+    "Latitude": 40.018309,
+    "Longitude": -105.242139,
+    "ShadowTime": 1780316400,
+    "ShadowDate": 0
   }
 }
 ```
@@ -118,30 +123,47 @@ Ogni file descrive **una** posizione. Schema:
 | `up`          | `[x, y, z]` | verticale (opz., default `[0,0,1]`) |
 | `perspective` | bool        | `true` prospettiva, `false` parallela (opz., default `true`) |
 | `fov`         | numero      | angolo di campo in gradi (solo prospettiva, opz.) |
+| `image_width` | numero      | larghezza immagine SketchUp in pollici; `0` = non impostata (opz.) |
 | `height`      | numero      | altezza inquadratura (solo parallela, opz.) |
 | `units`       | testo       | unità di *questa* camera; sovrascrive quella globale (opz.) |
 
-Le coordinate `eye`/`target` sono espresse nell'**unità scelta nella GUI**
-(mm, cm, m, inch, ft) e convertite internamente. Se usi le coordinate lette
-in SketchUp, imposta l'unità di misura del tuo modello.
+> **Unità delle coordinate.** I valori `eye`/`target` esportati dall'API di
+> SketchUp sono in **pollici** (unità interna). Per questo nella GUI l'unità è
+> preimpostata su **`inch`**: così i tuoi file vengono riprodotti *esattamente*
+> come erano. Cambia l'unità (mm/cm/m/ft) solo se le coordinate dei tuoi file
+> sono espresse in un'altra unità.
 
-### shadow (luci e ombre)
-| Campo                  | Tipo   | Descrizione |
-|------------------------|--------|-------------|
-| `display_shadows`      | bool   | mostra le ombre (default `true`) |
-| `light`                | 0–100  | intensità luce |
-| `dark`                 | 0–100  | intensità zone in ombra |
-| `north_angle`          | gradi  | orientamento del nord |
-| `use_sun_for_shading`  | bool   | usa il sole per l'illuminazione |
-| `date` + `time_of_day` | testo  | data `AAAA-MM-GG` e ora `HH:MM` del sole |
-| `time`                 | testo  | in alternativa: `2024-06-21T14:00:00` |
-| `latitude`/`longitude` | numero | posizione geografica (opz.) |
-| `tz_offset`            | numero | fuso orario in ore (opz.) |
-| `display_on_ground`, `display_on_all_faces`, `edges_cast_shadows` | bool | opzioni ombre (opz.) |
+### shadows (luci e ombre) — chiavi native di SketchUp
+| Chiave                 | Tipo    | Descrizione |
+|------------------------|---------|-------------|
+| `DisplayShadows`       | bool    | mostra le ombre |
+| `UseSunForAllShading`  | bool    | usa il sole per l'illuminazione |
+| `Light`                | 0–100   | intensità luce |
+| `Dark`                 | 0–100   | intensità zone in ombra |
+| `NorthAngle`           | gradi   | orientamento del nord |
+| `TZOffset`             | ore     | fuso orario |
+| `Latitude`/`Longitude` | numero  | posizione geografica |
+| `ShadowTime`           | intero  | data+ora del sole come **timestamp Unix** (time_t) |
+| `ShadowDate`           | —       | ignorato (la data è già dentro `ShadowTime`) |
+
+Qualsiasi altra chiave nativa valida di `ShadowInfo` viene passata così com'è;
+una chiave non riconosciuta viene semplicemente saltata e annotata nel log.
+
+<details>
+<summary>Alias "amichevoli" alternativi (facoltativi)</summary>
+
+Al posto delle chiavi native puoi usare, se preferisci, questi nomi minuscoli
+(usati nulla di obbligatorio): `display_shadows`, `light`, `dark`,
+`north_angle`, `use_sun_for_shading`, `latitude`, `longitude`, `tz_offset`,
+`display_on_ground`, `display_on_all_faces`, `edges_cast_shadows`, e per l'ora
+del sole `date` + `time_of_day` (`"2024-06-21"` + `"14:00"`) oppure
+`time` (`"2024-06-21T14:00:00"`). Anche il blocco camera accetta la chiave
+singolare `shadow` invece di `shadows`.
+</details>
 
 Nella cartella [`sample_json/`](sample_json/) trovi **9 file di esempio**
-(`pos1.json` … `pos9.json`) già pronti, con una camera che orbita attorno
-all'origine e ore del giorno diverse.
+(`pos1.json` … `pos9.json`) già pronti, nel formato nativo, con la camera che
+orbita attorno al soggetto e l'ora del sole che avanza di posizione in posizione.
 
 ---
 

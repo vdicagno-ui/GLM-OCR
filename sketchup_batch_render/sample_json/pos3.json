@@ -1,31 +1,33 @@
 {
-  "_descrizione": "Posizione 3 - vista a 80 gradi",
   "camera": {
     "eye": [
-      868.2,
-      4924.0,
-      1600.0
+      -0.981094687284,
+      3.142771487637,
+      1.09
     ],
     "target": [
-      0.0,
-      0.0,
-      800.0
+      -1.3631206781517342,
+      0.9761944310100928,
+      0.0949077387824893
     ],
     "up": [
-      0,
-      0,
-      1
+      0.0,
+      0.0,
+      1.0
     ],
     "perspective": true,
-    "fov": 35.0
+    "fov": 35.0,
+    "image_width": 0.0
   },
-  "shadow": {
-    "display_shadows": true,
-    "light": 80,
-    "dark": 30,
-    "north_angle": 0.0,
-    "use_sun_for_shading": true,
-    "date": "2024-06-21",
-    "time_of_day": "10:00"
+  "shadows": {
+    "DisplayShadows": true,
+    "UseSunForAllShading": true,
+    "Light": 61,
+    "Dark": 13,
+    "TZOffset": -7.0,
+    "Latitude": 40.018309,
+    "Longitude": -105.242139,
+    "ShadowTime": 1780323600,
+    "ShadowDate": 0
   }
 }

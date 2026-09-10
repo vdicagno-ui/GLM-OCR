@@ -78,6 +78,10 @@ module SkpBatchRender
     Geom::Vector3d.new(arr[0].to_f, arr[1].to_f, arr[2].to_f)
   end
 
+  def self.truthy(v)
+    v ? true : false
+  end
+
   # --- applica la camera ------------------------------------------------------
   def self.apply_camera(view, cam, units)
     return if cam.nil?
@@ -99,56 +103,79 @@ module SkpBatchRender
       camera.height = cam['height'].to_f * f
     end
 
+    # image_width proviene dal dump nativo di SketchUp (in pollici); 0 = non impostato
+    if cam['image_width'] && cam['image_width'].to_f > 0
+      begin
+        camera.image_width = cam['image_width'].to_f
+      rescue StandardError
+      end
+    end
+
     view.camera = camera
   end
 
   # --- applica luci e ombre ---------------------------------------------------
+  #
+  # Accetta DUE formati (anche mescolati):
+  #  1) chiavi native di SketchUp ShadowInfo, cosi' come esportate dall'API:
+  #       "DisplayShadows", "UseSunForAllShading", "Light", "Dark",
+  #       "TZOffset", "Latitude", "Longitude", "NorthAngle",
+  #       "ShadowTime" (intero time_t Unix) ...
+  #  2) alias "amichevoli" minuscoli usati nei file di esempio:
+  #       "display_shadows", "light", "dark", "north_angle",
+  #       "use_sun_for_shading", "date" + "time_of_day", "time" ...
   def self.apply_shadow(shadow, s)
     return if s.nil?
 
-    shadow['DisplayShadows'] = (s.key?('display_shadows') ? s['display_shadows'] : true) ? true : false
-    shadow['Light'] = s['light'].to_i if s['light']
-    shadow['Dark']  = s['dark'].to_i  if s['dark']
-    shadow['NorthAngle'] = s['north_angle'].to_f if s['north_angle']
-    shadow['UseSunForAllShading'] = s['use_sun_for_shading'] ? true : false if s.key?('use_sun_for_shading')
-    shadow['DisplayOnAllFaces']   = s['display_on_all_faces'] ? true : false if s.key?('display_on_all_faces')
-    shadow['DisplayOnGroundPlane'] = s['display_on_ground'] ? true : false if s.key?('display_on_ground')
-    shadow['EdgesCastShadows']    = s['edges_cast_shadows'] ? true : false if s.key?('edges_cast_shadows')
-
-    # posizione geografica (facoltativa) -> influenza la direzione del sole
-    shadow['Latitude']  = s['latitude'].to_f  if s['latitude']
-    shadow['Longitude'] = s['longitude'].to_f if s['longitude']
-    shadow['TZOffset']  = s['tz_offset'].to_f  if s['tz_offset']
-
-    t = parse_time(s)
-    shadow['ShadowTime'] = t if t
-  end
-
-  # accetta:  "time": "2024-06-21T14:30:00"
-  #   oppure  "date": "2024-06-21", "time_of_day": "14:30"
-  def self.parse_time(s)
-    if s['time']
+    s.each do |key, value|
       begin
-        return Time.parse(s['time'].to_s)
-      rescue StandardError
+        case key
+        # ---- gestioni speciali ----
+        when 'ShadowTime', 'time'
+          shadow['ShadowTime'] =
+            value.is_a?(Numeric) ? Time.at(value.to_i) : Time.parse(value.to_s)
+        when 'ShadowTime_time_t'
+          shadow['ShadowTime_time_t'] = value.to_i
+        when 'ShadowDate'
+          next # non e' una chiave scrivibile: ShadowTime contiene gia' la data
+        when 'date', 'time_of_day'
+          next # gestiti insieme dopo il ciclo
+        # ---- alias amichevoli (file di esempio) ----
+        when 'display_shadows'      then shadow['DisplayShadows'] = truthy(value)
+        when 'light'                then shadow['Light'] = value.to_i
+        when 'dark'                 then shadow['Dark'] = value.to_i
+        when 'north_angle'          then shadow['NorthAngle'] = value.to_f
+        when 'use_sun_for_shading'  then shadow['UseSunForAllShading'] = truthy(value)
+        when 'display_on_ground'    then shadow['DisplayOnGroundPlane'] = truthy(value)
+        when 'display_on_all_faces' then shadow['DisplayOnAllFaces'] = truthy(value)
+        when 'edges_cast_shadows'   then shadow['EdgesCastShadows'] = truthy(value)
+        when 'latitude'             then shadow['Latitude'] = value.to_f
+        when 'longitude'            then shadow['Longitude'] = value.to_f
+        when 'tz_offset'            then shadow['TZOffset'] = value.to_f
+        else
+          # chiave nativa ShadowInfo: assegnazione diretta
+          shadow[key] = value
+        end
+      rescue StandardError => e
+        log("Ombra: chiave '#{key}' ignorata (#{e.message})")
       end
     end
+
+    # supporto "date" + "time_of_day" dei file di esempio
     if s['date']
-      date = s['date'].to_s
-      tod  = (s['time_of_day'] || '12:00').to_s
       begin
-        return Time.parse("#{date} #{tod}")
-      rescue StandardError
+        shadow['ShadowTime'] = Time.parse("#{s['date']} #{s['time_of_day'] || '12:00'}")
+      rescue StandardError => e
+        log("Ombra: data non valida (#{e.message})")
       end
     end
-    nil
   end
 
   # --- render di una posizione -----------------------------------------------
   def self.render_position(model, pos, index, outdir, width, height, units)
     view = model.active_view
     apply_camera(view, pos['camera'], units)
-    apply_shadow(model.shadow_info, pos['shadow'])
+    apply_shadow(model.shadow_info, pos['shadows'] || pos['shadow'])
 
     view = model.active_view
     view.refresh if view.respond_to?(:refresh)

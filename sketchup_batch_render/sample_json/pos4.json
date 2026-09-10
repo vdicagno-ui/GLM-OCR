@@ -1,0 +1,31 @@
+{
+  "_descrizione": "Posizione 4 - vista a 120 gradi",
+  "camera": {
+    "eye": [
+      -2500.0,
+      4330.1,
+      1600.0
+    ],
+    "target": [
+      0.0,
+      0.0,
+      800.0
+    ],
+    "up": [
+      0,
+      0,
+      1
+    ],
+    "perspective": true,
+    "fov": 35.0
+  },
+  "shadow": {
+    "display_shadows": true,
+    "light": 80,
+    "dark": 30,
+    "north_angle": 0.0,
+    "use_sun_for_shading": true,
+    "date": "2024-06-21",
+    "time_of_day": "11:00"
+  }
+}

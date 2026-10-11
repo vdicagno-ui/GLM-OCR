@@ -147,29 +147,17 @@ def ai_extract(
         "Restituisci solo il JSON con i campi elencati sopra come chiavi."
     )
 
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": FEWSHOT_USER},
-            {"role": "assistant", "content": FEWSHOT_ASSISTANT},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0,
-        "stream": False,
-    }
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": FEWSHOT_USER},
+        {"role": "assistant", "content": FEWSHOT_ASSISTANT},
+        {"role": "user", "content": user_prompt},
+    ]
+    # Give the model enough room so the JSON is never truncated (a frequent
+    # cause of "no valid JSON" with many fields), scaled to the field count.
+    max_tokens = min(4096, 512 + 120 * len(fields))
 
-    try:
-        resp = _post_json(f"{base_url}/chat/completions", payload, timeout=timeout)
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Connessione AI fallita: {exc.reason}") from exc
-    except Exception as exc:
-        raise RuntimeError(f"Chiamata AI fallita: {exc}") from exc
-
-    try:
-        content = resp["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Risposta AI non valida: {resp}") from exc
+    content = _chat_completion(base_url, model, messages, timeout, max_tokens)
 
     parsed = _parse_json_object(content)
     # Normalise: guarantee every requested field is present.
@@ -180,9 +168,48 @@ def ai_extract(
     return result
 
 
+def _chat_completion(
+    base_url: str, model: str, messages: list, timeout: int, max_tokens: int
+) -> str:
+    """Call the chat endpoint, forcing JSON output when the server supports it."""
+    base_payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0,
+        "stream": False,
+        "max_tokens": max_tokens,
+    }
+    # First try asking the server to constrain the output to a JSON object
+    # (supported by LM Studio and Ollama); fall back if it rejects the field.
+    attempts = [
+        {**base_payload, "response_format": {"type": "json_object"}},
+        base_payload,
+    ]
+
+    last_exc: Exception | None = None
+    for payload in attempts:
+        try:
+            resp = _post_json(f"{base_url}/chat/completions", payload, timeout=timeout)
+        except urllib.error.HTTPError as exc:
+            # 4xx often means the server rejected response_format: try the next.
+            last_exc = RuntimeError(f"Il server AI ha rifiutato la richiesta ({exc.code}).")
+            continue
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"Connessione AI fallita: {exc.reason}") from exc
+        except Exception as exc:
+            raise RuntimeError(f"Chiamata AI fallita: {exc}") from exc
+
+        try:
+            return resp["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise RuntimeError(f"Risposta AI non valida: {resp}") from exc
+
+    raise last_exc or RuntimeError("Chiamata AI fallita.")
+
+
 def _parse_json_object(content: str) -> dict:
-    """Extract the first JSON object from a model reply, tolerating extra text."""
-    content = content.strip()
+    """Extract a JSON object from a model reply, tolerating surrounding text."""
+    content = (content or "").strip()
     # Strip common ```json ... ``` fences.
     fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", content, re.DOTALL)
     if fence:
@@ -195,10 +222,20 @@ def _parse_json_object(content: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # Fallback: grab the outermost {...} block.
-    start = content.find("{")
-    end = content.rfind("}")
-    if start != -1 and end != -1 and end > start:
+    # Find the first balanced {...} block (handles leading/trailing prose and
+    # nested braces better than a naive first/last search).
+    block = _first_json_block(content)
+    if block is not None:
+        try:
+            obj = json.loads(block)
+            if isinstance(obj, dict):
+                return obj
+        except json.JSONDecodeError:
+            pass
+
+    # Last resort: outermost braces.
+    start, end = content.find("{"), content.rfind("}")
+    if start != -1 and end > start:
         try:
             obj = json.loads(content[start : end + 1])
             if isinstance(obj, dict):
@@ -206,7 +243,40 @@ def _parse_json_object(content: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    raise RuntimeError("La risposta AI non contiene un JSON valido.")
+    snippet = content[:200].replace("\n", " ")
+    raise RuntimeError(
+        "La risposta AI non contiene un JSON valido. "
+        f"Inizio risposta: {snippet!r}"
+    )
+
+
+def _first_json_block(text: str) -> str | None:
+    """Return the first balanced {...} substring, or None."""
+    depth = 0
+    start = -1
+    in_str = False
+    esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}":
+            if depth > 0:
+                depth -= 1
+                if depth == 0 and start != -1:
+                    return text[start : i + 1]
+    return None
 
 
 # ---------------------------------------------------------------------------

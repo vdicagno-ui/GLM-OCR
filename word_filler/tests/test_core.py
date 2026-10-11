@@ -209,6 +209,10 @@ def test_json_parsing():
     assert extractor._parse_json_object('{"a": "1"}') == {"a": "1"}
     assert extractor._parse_json_object('```json\n{"a": "1"}\n```') == {"a": "1"}
     assert extractor._parse_json_object('Ecco: {"a": "1"} fine') == {"a": "1"}
+    # Prose before and after, with a brace inside a string value.
+    assert extractor._parse_json_object(
+        'Risposta:\n{"nota": "vedi {art. 1}", "x": "2"}\nGrazie!'
+    ) == {"nota": "vedi {art. 1}", "x": "2"}
     print("test_json_parsing OK")
 
 

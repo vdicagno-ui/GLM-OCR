@@ -13,6 +13,7 @@
 #include <commctrl.h>
 #include <commdlg.h>
 #include <shlwapi.h>
+#include <shlobj.h>
 #include <stdio.h>
 
 /* --- Struttura dei file .ico e delle risorse icona nei PE --- */
@@ -222,6 +223,15 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
                    L"Errore durante la scrittura delle risorse nell'eseguibile.");
         return FALSE;
     }
+
+    /*
+     * Avvisa la shell di Windows che l'icona del file e' cambiata, cosi' il
+     * desktop, la barra delle applicazioni e la cache icone si aggiornino
+     * senza bisogno di riavviare Explorer.
+     */
+    SHChangeNotify(SHCNE_UPDATEITEM, SHCNF_PATHW | SHCNF_FLUSH, exePath, NULL);
+    SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST | SHCNF_FLUSH, NULL, NULL);
+
     return TRUE;
 }
 
@@ -338,7 +348,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
 
             if (replace_icon(exe, ico, err, 512)) {
                 set_status(L"Icona sostituita con successo.\n"
-                           L"Nota: l'icona in Esplora risorse puo' aggiornarsi con un po' di ritardo.");
+                           L"Se su desktop vedi ancora la vecchia icona, aggiorna (F5) o riavvia il PC.");
                 MessageBoxW(hwnd, L"Icona sostituita correttamente.",
                             L"Operazione completata", MB_OK | MB_ICONINFORMATION);
             } else {

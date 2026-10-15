@@ -12,7 +12,7 @@ echo "Compilazione risorse..."
 echo "Compilazione eseguibile..."
 "$CC" -O2 -municode -mwindows -o CambiaIcona.exe \
     icon_changer.c resource.o \
-    -lcomctl32 -lcomdlg32 -lshlwapi -luser32 -lgdi32 \
+    -lcomctl32 -lcomdlg32 -lshlwapi -lshell32 -lole32 -luser32 -lgdi32 \
     -Wl,--subsystem,windows -s
 
 echo "Fatto: $(pwd)/CambiaIcona.exe"

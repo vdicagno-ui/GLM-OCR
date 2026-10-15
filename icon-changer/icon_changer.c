@@ -108,6 +108,90 @@ static void set_status(const wchar_t *msg)
 }
 
 /*
+ * Calcola l'offset in cui termina l'immagine PE (fine dell'ultima sezione
+ * con dati su disco). Tutto cio' che segue nel file e' "overlay": dati
+ * aggiunti in coda da strumenti come PyInstaller, NSIS, Inno Setup o gli
+ * eseguibili autoestraenti. L'API UpdateResource non preserva l'overlay,
+ * quindi dobbiamo salvarlo e rimetterlo a posto a mano.
+ *
+ * Restituisce TRUE se il file e' un PE valido; *off riceve l'offset di fine
+ * immagine (= inizio overlay).
+ */
+static BOOL pe_image_end(const BYTE *buf, DWORD size, DWORD *off)
+{
+    if (size < 0x40)
+        return FALSE;
+    if (buf[0] != 'M' || buf[1] != 'Z')
+        return FALSE;
+
+    DWORD e_lfanew = *(const DWORD *)(buf + 0x3C);
+    if ((size_t)e_lfanew + 24 > size)
+        return FALSE;
+    if (memcmp(buf + e_lfanew, "PE\0\0", 4) != 0)
+        return FALSE;
+
+    const BYTE *fileHdr = buf + e_lfanew + 4;           /* IMAGE_FILE_HEADER */
+    WORD numSections   = *(const WORD *)(fileHdr + 2);
+    WORD sizeOptHdr    = *(const WORD *)(fileHdr + 16);
+
+    DWORD secTableOff = e_lfanew + 4 + 20 + sizeOptHdr; /* tabella sezioni */
+    if ((size_t)secTableOff + (size_t)numSections * 40 > size)
+        return FALSE;
+
+    DWORD end = 0;
+    for (WORD i = 0; i < numSections; i++) {
+        const BYTE *s = buf + secTableOff + (size_t)i * 40;
+        DWORD sizeRaw = *(const DWORD *)(s + 16);        /* SizeOfRawData */
+        DWORD ptrRaw  = *(const DWORD *)(s + 20);        /* PointerToRawData */
+        if (sizeRaw == 0)
+            continue;
+        DWORD secEnd = ptrRaw + sizeRaw;
+        if (secEnd > end)
+            end = secEnd;
+    }
+    if (end == 0 || end > size)
+        return FALSE;
+
+    *off = end;
+    return TRUE;
+}
+
+/* Riscrive l'overlay salvato in coda al file (troncando eventuale coda
+ * lasciata da UpdateResource e riattaccando i dati originali). */
+static BOOL restore_overlay(const wchar_t *exePath, const BYTE *overlay,
+                            DWORD overlaySize)
+{
+    DWORD hdrLen = 0;
+    BYTE *hdr = read_file(exePath, &hdrLen);
+    if (!hdr)
+        return FALSE;
+
+    DWORD newEnd = 0;
+    BOOL ok = pe_image_end(hdr, hdrLen, &newEnd);
+    free(hdr);
+    if (!ok || newEnd > hdrLen)
+        return FALSE;
+
+    HANDLE h = CreateFileW(exePath, GENERIC_READ | GENERIC_WRITE, 0, NULL,
+                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (h == INVALID_HANDLE_VALUE)
+        return FALSE;
+
+    LARGE_INTEGER pos;
+    pos.QuadPart = newEnd;
+    if (!SetFilePointerEx(h, pos, NULL, FILE_BEGIN) || !SetEndOfFile(h)) {
+        CloseHandle(h);
+        return FALSE;
+    }
+
+    DWORD written = 0;
+    BOOL wok = WriteFile(h, overlay, overlaySize, &written, NULL) &&
+               written == overlaySize;
+    CloseHandle(h);
+    return wok;
+}
+
+/*
  * Sostituisce il gruppo icona principale dell'eseguibile di destinazione
  * con il contenuto del file .ico indicato.
  *
@@ -117,22 +201,43 @@ static void set_status(const wchar_t *msg)
 static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
                          wchar_t *err, size_t errLen)
 {
+    /* Salva l'eventuale overlay dell'eseguibile (PyInstaller, NSIS, ...). */
+    BYTE *overlay = NULL;
+    DWORD overlaySize = 0;
+    {
+        DWORD exeSize = 0;
+        BYTE *exe = read_file(exePath, &exeSize);
+        if (exe) {
+            DWORD imgEnd = 0;
+            if (pe_image_end(exe, exeSize, &imgEnd) && exeSize > imgEnd) {
+                overlaySize = exeSize - imgEnd;
+                overlay = (BYTE *)malloc(overlaySize);
+                if (overlay)
+                    memcpy(overlay, exe + imgEnd, overlaySize);
+                else
+                    overlaySize = 0;
+            }
+            free(exe);
+        }
+    }
+
     DWORD icoSize = 0;
     BYTE *ico = read_file(icoPath, &icoSize);
     if (!ico) {
+        free(overlay);
         _snwprintf(err, errLen, L"Impossibile leggere il file .ico scelto.");
         return FALSE;
     }
 
     if (icoSize < sizeof(ICONDIR)) {
-        free(ico);
+        free(ico); free(overlay);
         _snwprintf(err, errLen, L"Il file icona non e' valido.");
         return FALSE;
     }
 
     ICONDIR *dir = (ICONDIR *)ico;
     if (dir->idReserved != 0 || dir->idType != 1 || dir->idCount == 0) {
-        free(ico);
+        free(ico); free(overlay);
         _snwprintf(err, errLen, L"Formato .ico non riconosciuto.");
         return FALSE;
     }
@@ -140,7 +245,7 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
     WORD count = dir->idCount;
     /* Verifica che la directory delle immagini stia nel buffer. */
     if ((size_t)6 + (size_t)count * sizeof(ICONDIRENTRY) > icoSize) {
-        free(ico);
+        free(ico); free(overlay);
         _snwprintf(err, errLen, L"File icona troncato o danneggiato.");
         return FALSE;
     }
@@ -149,7 +254,7 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
     size_t grpSize = 6 + (size_t)count * sizeof(GRPICONDIRENTRY);
     GRPICONDIR *grp = (GRPICONDIR *)calloc(1, grpSize);
     if (!grp) {
-        free(ico);
+        free(ico); free(overlay);
         _snwprintf(err, errLen, L"Memoria insufficiente.");
         return FALSE;
     }
@@ -162,8 +267,7 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
         ICONDIRENTRY *e = &dir->idEntries[i];
         if ((size_t)e->dwImageOffset + e->dwBytesInRes > icoSize ||
             e->dwBytesInRes == 0) {
-            free(grp);
-            free(ico);
+            free(grp); free(ico); free(overlay);
             _snwprintf(err, errLen, L"Immagine %u del file icona non valida.", (unsigned)(i + 1));
             return FALSE;
         }
@@ -180,8 +284,7 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
 
     HANDLE hUpd = BeginUpdateResourceW(exePath, FALSE);
     if (!hUpd) {
-        free(grp);
-        free(ico);
+        free(grp); free(ico); free(overlay);
         _snwprintf(err, errLen,
                    L"Impossibile aprire l'eseguibile in scrittura.\n"
                    L"Verifica che il file non sia in uso e che tu abbia i permessi.");
@@ -219,10 +322,27 @@ static BOOL replace_icon(const wchar_t *exePath, const wchar_t *icoPath,
     free(ico);
 
     if (!ok) {
+        free(overlay);
         _snwprintf(err, errLen,
                    L"Errore durante la scrittura delle risorse nell'eseguibile.");
         return FALSE;
     }
+
+    /*
+     * Se l'eseguibile aveva un overlay (PyInstaller, NSIS, autoestraente...),
+     * UpdateResource lo ha scartato: lo rimettiamo in coda al file, altrimenti
+     * il programma non ritroverebbe il proprio contenuto all'avvio.
+     */
+    if (overlay && overlaySize > 0) {
+        if (!restore_overlay(exePath, overlay, overlaySize)) {
+            free(overlay);
+            _snwprintf(err, errLen,
+                       L"Icona scritta, ma non e' stato possibile ripristinare i\n"
+                       L"dati in coda all'eseguibile. Ripristina il file da una copia.");
+            return FALSE;
+        }
+    }
+    free(overlay);
 
     /*
      * Avvisa la shell di Windows che l'icona del file e' cambiata, cosi' il

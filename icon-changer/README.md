@@ -15,6 +15,15 @@ Windows per l'aggiornamento delle risorse (`BeginUpdateResource` /
 3. **Sfoglia** e seleziona il file `.ico` con la nuova icona (ne vedi l'anteprima).
 4. Premi **Applica nuova icona**.
 
+### Eseguibili PyInstaller / installer
+
+Funziona anche con eseguibili che contengono dati aggiunti in coda (overlay),
+come i programmi Python impacchettati con **PyInstaller**, gli installer
+**NSIS**/**Inno Setup** e gli autoestraenti: l'app salva l'overlay prima di
+modificare l'icona e lo rimette a posto dopo, così il programma continua a
+partire. (Le API di Windows da sole scarterebbero l'overlay, corrompendo il
+file.) Resta comunque prudente lavorare su una **copia**.
+
 Note:
 - L'eseguibile da modificare non deve essere in esecuzione.
 - Possono servire i permessi di scrittura sul file (se si trova in cartelle
